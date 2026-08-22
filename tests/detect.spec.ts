@@ -79,6 +79,47 @@ describe('shouldModerate', () => {
   })
 })
 
+describe('collectMessageParts files', () => {
+  it('keeps OneBot file_id and busid when src is only a filename', () => {
+    const parts = collectMessageParts([{
+      type: 'file',
+      attrs: {
+        src: '大一新生必备清单(详细版)(2) (1).docx',
+        file: '大一新生必备清单(详细版)(2) (1).docx',
+        file_id: '/abc-file-id',
+        busid: '102',
+        name: '大一新生必备清单(详细版)(2) (1).docx',
+      },
+    }])
+    assert.deepEqual(parts.files, [{
+      src: '大一新生必备清单(详细版)(2) (1).docx',
+      name: '大一新生必备清单(详细版)(2) (1).docx',
+      fileId: '/abc-file-id',
+      busid: 102,
+    }])
+  })
+
+  it('prefers a downloadable url but still keeps file_id for fallback', () => {
+    const parts = collectMessageParts([{
+      type: 'file',
+      attrs: {
+        src: 'list.docx',
+        url: 'https://files.test/list.docx',
+        file: 'list.docx',
+        file_id: 'FID123',
+        busid: 102,
+        filename: 'list.docx',
+      },
+    }])
+    assert.deepEqual(parts.files, [{
+      src: 'https://files.test/list.docx',
+      name: 'list.docx',
+      fileId: 'FID123',
+      busid: 102,
+    }])
+  })
+})
+
 describe('collectUrls and share payloads', () => {
   it('unescapes qq json slashes and reads object share data', () => {
     assert.deepEqual(collectUrls('https:\\/\\/docs.qq.com\\/doc\\/DWHNhYk1iZVZMY1Rh'), [

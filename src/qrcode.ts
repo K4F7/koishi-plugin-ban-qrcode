@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { HTTP } from 'koishi'
 import Jimp from 'jimp'
 import jsQR from 'jsqr'
-import { isDownloadableSrc, parseDataUrl } from './detect'
+import { FileRef, isDownloadableSrc, isOfficeFile, parseDataUrl } from './detect'
 
 type WechatScan = (input: {
   data: Uint8ClampedArray
@@ -14,26 +14,26 @@ type WechatScan = (input: {
 let wechatScan: WechatScan | undefined
 let wechatLoad: Promise<WechatScan | null> | undefined
 
+export type FileDownload = FileRef & { groupId?: string }
+
 type FileInternal = {
   getImage?(src: string): unknown
+  getFile?(...args: unknown[]): unknown
+  get_file?(...args: unknown[]): unknown
+  getGroupFileUrl?(...args: unknown[]): unknown
+  get_group_file_url?(...args: unknown[]): unknown
 }
 
-export function createFileResolver(bot: { internal?: FileInternal }) {
-  return async (src: string): Promise<Buffer | string | null> => {
+export function createFileResolver(bot: { internal?: FileInternal }, groupId?: string) {
+  return async (input: string | FileDownload): Promise<Buffer | string | null> => {
     const internal = bot.internal
     if (!internal) return null
+    const file = typeof input === 'string' ? { src: input, name: input } : input
     try {
-      const info = unwrapFileInfo(await internal.getImage?.(src))
-      if (!info) return null
-      if (typeof info.base64 === 'string' && info.base64) {
-        return Buffer.from(info.base64, 'base64')
+      if (isOfficeFile(file.name) || isOfficeFile(file.src)) {
+        return await resolveOfficeFile(internal, { ...file, groupId: file.groupId ?? groupId })
       }
-      if (typeof info.url === 'string' && isDownloadableSrc(info.url)) return info.url
-      if (typeof info.file === 'string' && info.file) {
-        if (isDownloadableSrc(info.file)) return info.file
-        return readFile(info.file)
-      }
-      return null
+      return await resolveFromInfo(unwrapFileInfo(await internal.getImage?.(file.src)))
     } catch {
       return null
     }
@@ -45,6 +45,24 @@ export async function downloadImage(
   src: string,
   resolveFile?: (src: string) => Promise<Buffer | string | null>,
 ): Promise<Buffer> {
+  return downloadBuffer(http, src, resolveFile, 'cannot download image')
+}
+
+export async function downloadFile(
+  http: HTTP,
+  file: FileDownload,
+  resolveFile?: (file: FileDownload) => Promise<Buffer | string | null>,
+): Promise<Buffer> {
+  return downloadBuffer(http, file, resolveFile, 'cannot download file')
+}
+
+async function downloadBuffer<T extends string | FileDownload>(
+  http: HTTP,
+  target: T,
+  resolveFile: ((input: T) => Promise<Buffer | string | null>) | undefined,
+  fallback: string,
+): Promise<Buffer> {
+  const src = typeof target === 'string' ? target : target.src
   let lastError: unknown
   const remote = /^https?:/i.test(src)
   if (isDownloadableSrc(src)) {
@@ -54,23 +72,23 @@ export async function downloadImage(
       lastError = error
     }
     if (!remote) {
-      throw lastError instanceof Error ? lastError : new Error('cannot download image')
+      throw lastError instanceof Error ? lastError : new Error(fallback)
     }
   }
 
   if (resolveFile) {
     try {
-      const resolved = await resolveFile(src)
+      const resolved = await resolveFile(target)
       if (Buffer.isBuffer(resolved)) return resolved
       if (typeof resolved === 'string' && resolved && resolved !== src) {
-        return downloadDirect(http, resolved)
+        return isDownloadableSrc(resolved) ? downloadDirect(http, resolved) : readFile(resolved)
       }
     } catch (error) {
       lastError = lastError ?? error
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error('cannot download image')
+  throw lastError instanceof Error ? lastError : new Error(fallback)
 }
 
 async function downloadDirect(http: HTTP, src: string): Promise<Buffer> {
@@ -87,6 +105,75 @@ async function downloadDirect(http: HTTP, src: string): Promise<Buffer> {
     return Buffer.from(file.data as ArrayBuffer)
   }
   return Buffer.from(await http.get<ArrayBuffer>(src, { responseType: 'arraybuffer' }))
+}
+
+async function resolveOfficeFile(internal: FileInternal, file: FileDownload): Promise<Buffer | string | null> {
+  const keys = uniqueKeys([
+    file.fileId,
+    file.src && !isDownloadableSrc(file.src) ? file.src : undefined,
+  ])
+
+  for (const key of keys) {
+    const fromFile = await firstResolved([
+      () => internal.getFile?.({ file: key }),
+      () => internal.get_file?.({ file: key }),
+    ])
+    if (fromFile) return fromFile
+  }
+
+  const groupId = file.groupId
+  if (!groupId) return null
+  const busid = file.busid ?? 102
+  const gid = /^\d+$/.test(groupId) ? Number(groupId) : groupId
+
+  for (const key of keys) {
+    const payload = { group_id: gid, file_id: key, busid }
+    const fromUrl = await firstResolved([
+      () => internal.getGroupFileUrl?.(payload),
+      () => internal.get_group_file_url?.(payload),
+      () => internal.getGroupFileUrl?.(gid, key, busid),
+      () => internal.get_group_file_url?.(gid, key, busid),
+    ])
+    if (fromUrl) return fromUrl
+  }
+
+  return null
+}
+
+async function firstResolved(calls: Array<() => unknown>): Promise<Buffer | string | null> {
+  for (const call of calls) {
+    try {
+      const result = await resolveFromInfo(unwrapFileInfo(await call()))
+      if (result) return result
+    } catch {
+      // adapter methods may be missing or reject; try the next one
+    }
+  }
+  return null
+}
+
+async function resolveFromInfo(info: Record<string, unknown> | null): Promise<Buffer | string | null> {
+  if (!info) return null
+  if (typeof info.base64 === 'string' && info.base64) {
+    return Buffer.from(info.base64, 'base64')
+  }
+  if (typeof info.url === 'string' && isDownloadableSrc(info.url)) return info.url
+  if (typeof info.file === 'string' && info.file) {
+    if (isDownloadableSrc(info.file)) return info.file
+    return readFile(info.file)
+  }
+  return null
+}
+
+function uniqueKeys(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const value of values) {
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    keys.push(value)
+  }
+  return keys
 }
 
 export async function decodeQr(buffer: Buffer): Promise<string | null> {
@@ -127,6 +214,9 @@ function loadWechatScan() {
 }
 
 function unwrapFileInfo(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string' && value) {
+    return isDownloadableSrc(value) ? { url: value } : { file: value }
+  }
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
   if (record.data && typeof record.data === 'object' && !Array.isArray(record.data)) {

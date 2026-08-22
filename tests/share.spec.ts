@@ -17,6 +17,20 @@ const groupCard = JSON.stringify({
   },
 })
 
+const realGroupCard = JSON.stringify({
+  app: 'com.tencent.contact.lua',
+  view: 'contact',
+  prompt: '[QQ名片]群聊',
+  meta: {
+    contact: {
+      avatar: 'https://p.qlogo.cn/gh/123456/123456/100',
+      nickname: '新生补给站',
+      tag: '群名片',
+      jumpUrl: 'mqqapi://card/show_pslcard?src_type=internal&source=sharecard&version=1&uin=123456&card_type=group',
+    },
+  },
+})
+
 const inviteApp = JSON.stringify({
   app: 'com.tencent.qun.invite',
   prompt: '邀请你加入群聊',
@@ -56,10 +70,20 @@ describe('isGroupInviteCard', () => {
     assert.equal(isGroupInviteCard('<?xml version="1.0"?><msg serviceID="1">邀请你加入群聊</msg>'), true)
   })
 
+  it('detects real QQ 群名片 even when jumpUrl includes source=sharecard', () => {
+    assert.equal(isGroupInviteCard(realGroupCard), true)
+    assert.equal(isGroupInviteCard(JSON.stringify({ data: realGroupCard })), true)
+    assert.equal(isGroupInviteCard('[CQ:contact,type=group,id=123456]'), true)
+    assert.equal(isGroupInviteCard(JSON.stringify({ type: 'group', id: '123456' })), true)
+    assert.equal(isGroupInviteCard(`[CQ:json,data=${realGroupCard.replace(/,/g, '&#44;')}]`), true)
+  })
+
   it('ignores friend cards and tencent-doc news cards', () => {
     assert.equal(isGroupInviteCard(friendCard), false)
     assert.equal(isGroupInviteCard(docCard), false)
     assert.equal(isGroupInviteCard('普通文本邀请大家晚上一起自习'), false)
+    assert.equal(isGroupInviteCard('[CQ:contact,type=qq,id=123456]'), false)
+    assert.equal(isGroupInviteCard(JSON.stringify({ type: 'qq', id: '123456' })), false)
   })
 })
 
@@ -97,6 +121,7 @@ describe('collectMessageParts', () => {
     const parts = collectMessageParts([
       { type: 'text', attrs: { content: '看这个 https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh' } },
       { type: 'json', attrs: { data: groupCard } },
+      { type: 'contact', attrs: { type: 'group', id: '123456' } },
       { type: 'file', attrs: { src: 'https://a.test/list.docx', filename: '大一新生必备清单.docx' } },
       { type: 'img', attrs: { src: 'https://a.test/1.png' } },
     ], `[json:data=${inviteApp}]`)
@@ -105,6 +130,7 @@ describe('collectMessageParts', () => {
     assert.deepEqual(parts.files, [{ src: 'https://a.test/list.docx', name: '大一新生必备清单.docx' }])
     assert.ok(parts.shares.includes(groupCard))
     assert.ok(parts.shares.includes(inviteApp))
+    assert.ok(parts.shares.some(item => item.includes('"type":"group"') && item.includes('123456')))
     assert.ok(parts.urls.includes('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'))
   })
 })

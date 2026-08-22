@@ -30,6 +30,8 @@ export type SkipReason = 'direct' | 'no-guild' | 'no-user' | 'guild-filter' | 's
 export interface FileRef {
   src: string
   name: string
+  fileId?: string
+  busid?: number
 }
 
 export interface MessageParts {
@@ -75,6 +77,10 @@ const SHARE_TYPES = new Set([
   'onebot:xml',
   'onebot:share',
 ])
+const CONTACT_TYPES = new Set([
+  'contact',
+  'onebot:contact',
+])
 const FILE_TYPES = new Set(['file'])
 const OFFICE_FILE = /\.(docx?|txt)$/i
 
@@ -118,14 +124,24 @@ export function collectMessageParts(nodes: readonly ImageNode[], extra = ''): Me
         if (typeof content === 'string' && content) texts.push(content)
       }
       if (SHARE_TYPES.has(node.type)) {
-        addShare(node.attrs?.data ?? node.attrs?.content ?? node.attrs?.value)
+        addShare(unwrapShareData(node.attrs?.data ?? node.attrs?.content ?? node.attrs?.value))
+      }
+      if (CONTACT_TYPES.has(node.type)) {
+        addShare(node.attrs)
       }
       if (FILE_TYPES.has(node.type)) {
-        const src = pickSrc(node.attrs)
-        const name = String(node.attrs?.filename ?? node.attrs?.name ?? node.attrs?.file ?? '')
-        if (src && !seenFile.has(src)) {
-          seenFile.add(src)
-          files.push({ src, name })
+        const fileId = pickFileId(node.attrs)
+        const src = pickSrc(node.attrs) ?? fileId
+        const name = String(node.attrs?.filename ?? node.attrs?.name ?? node.attrs?.file_name ?? node.attrs?.file ?? '')
+        if (src && !seenFile.has(fileId || src)) {
+          seenFile.add(fileId || src)
+          const busid = pickBusid(node.attrs)
+          files.push({
+            src,
+            name,
+            ...(fileId ? { fileId } : {}),
+            ...(busid !== undefined ? { busid } : {}),
+          })
         }
       }
       if (node.children?.length) visit(node.children)
@@ -139,6 +155,7 @@ export function collectMessageParts(nodes: readonly ImageNode[], extra = ''): Me
     const normalized = unescapePayload(extra)
     for (const match of extra.matchAll(/\[(?:CQ:)?json(?:,data=|:data=)([\s\S]+?)\]/gi)) addShare(match[1])
     for (const match of extra.matchAll(/\[(?:CQ:)?xml(?:,data=|:data=)([\s\S]+?)\]/gi)) addShare(match[1])
+    for (const match of extra.matchAll(/\[(?:CQ:)?contact(?:,|\.)[^\]]+\]/gi)) addShare(match[0])
     for (const match of extra.matchAll(/<(?:json|xml|onebot:json|onebot:xml)\s[^>]*\bdata="([^"]+)"/gi)) {
       addShare(decodeEntities(match[1]))
     }
@@ -177,18 +194,32 @@ export function decodeEntities(text: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&#44;/g, ',')
+    .replace(/&#91;/g, '[')
+    .replace(/&#93;/g, ']')
 }
 
 export function stringifyShare(raw: unknown): string | undefined {
-  if (raw && typeof raw === 'object') {
+  const unwrapped = unwrapShareData(raw)
+  if (unwrapped && typeof unwrapped === 'object') {
     try {
-      return JSON.stringify(raw)
+      return JSON.stringify(unwrapped)
     } catch {
       return undefined
     }
   }
-  if (typeof raw !== 'string' || !raw.trim()) return undefined
-  return unescapePayload(raw.trim())
+  if (typeof unwrapped !== 'string' || !unwrapped.trim()) return undefined
+  return unescapePayload(unwrapped.trim())
+}
+
+function unwrapShareData(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+  const record = raw as Record<string, unknown>
+  if (typeof record.app === 'string') return raw
+  if (typeof record.data === 'string' && record.data.trim().startsWith('{')) {
+    return unescapePayload(record.data.trim())
+  }
+  return raw
 }
 
 export function isDownloadableSrc(src: string): boolean {
@@ -209,6 +240,23 @@ function pickSrc(attrs?: Record<string, unknown>): string | undefined {
     .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
     .map(value => value.trim())
   return values.find(isDownloadableSrc) ?? values[0]
+}
+
+function pickFileId(attrs?: Record<string, unknown>): string | undefined {
+  const values = [attrs?.file_id, attrs?.fileId]
+    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    .map(value => value.trim())
+  return values[0]
+}
+
+function pickBusid(attrs?: Record<string, unknown>): number | undefined {
+  const value = attrs?.busid ?? attrs?.busId
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
 }
 
 function collectUrlsFromJson(raw: unknown): string[] {

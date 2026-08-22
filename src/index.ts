@@ -14,7 +14,7 @@ import {
   summarizeSrc,
 } from './detect'
 import { collectTencentDocUrls, extractOfficeText, fetchTencentDoc } from './document'
-import { createFileResolver, decodeQr, downloadImage, warmupQrDecoder } from './qrcode'
+import { createFileResolver, decodeQr, downloadFile, downloadImage, warmupQrDecoder } from './qrcode'
 import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from './share'
 
 export const name = 'ban-qrcode'
@@ -53,7 +53,7 @@ export const Config: Schema<Config> = Schema.object({
   ignoreUsers: Schema.array(Schema.string()).role('table').default([]).description('忽略的用户 ID。'),
   guilds: Schema.array(Schema.string()).role('table').default([]).description('只在这些群生效。留空表示全部群。'),
   scanQrcode: Schema.boolean().default(true).description('扫描图片二维码。'),
-  scanGroupInvite: Schema.boolean().default(true).description('拦截邀请 / 推荐群聊分享卡。'),
+  scanGroupInvite: Schema.boolean().default(true).description('拦截邀请 / 推荐群聊 / 群名片分享卡。'),
   scanDocs: Schema.boolean().default(true).description('检查腾讯文档和 Word / 文本附件里的广告。'),
   adKeywords: Schema.array(Schema.string()).role('table').default([]).description('额外广告关键词。命中即撤回。'),
   debug: Schema.boolean().default(true).description('输出调试日志：跳过原因、消息结构、下载/扫码/文档结果。'),
@@ -98,7 +98,9 @@ export function apply(ctx: Context, config: Config) {
     const docUrls = config.scanDocs
       ? collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n'))
       : []
-    const officeFiles = config.scanDocs ? parts.files.filter(file => isOfficeFile(file.name)) : []
+    const officeFiles = config.scanDocs
+      ? parts.files.filter(file => isOfficeFile(file.name) || isOfficeFile(file.src))
+      : []
     const docCards = config.scanDocs ? parts.shares.filter(isTencentDocCard) : []
     const docCardText = docCards.map(extractShareCardText).filter(Boolean).join('\n')
     const needInvite = config.scanGroupInvite && parts.shares.some(isGroupInviteCard)
@@ -121,7 +123,8 @@ export function apply(ctx: Context, config: Config) {
 
     if (!needInvite && !needQr && !needDocs) return
 
-    const resolveFile = createFileResolver(session.bot)
+    const guildId = resolveGuildId(moderate)
+    const resolveFile = createFileResolver(session.bot, guildId)
     const download = (src: string) => downloadImage(ctx.http, src, resolveFile)
 
     try {
@@ -202,7 +205,10 @@ export function apply(ctx: Context, config: Config) {
 
       for (const file of officeFiles) {
         try {
-          const doc = extractOfficeText(await download(file.src), file.name)
+          const doc = extractOfficeText(
+            await downloadFile(ctx.http, { ...file, groupId: guildId }, resolveFile),
+            file.name,
+          )
           const ad = doc ? detectAdContent(doc.text, doc.title || file.name, config.adKeywords) : null
           if (config.debug) logger.info('office %s ad=%s', file.name, Boolean(ad))
           if (doc && ad) {
@@ -210,7 +216,7 @@ export function apply(ctx: Context, config: Config) {
             return
           }
         } catch (error) {
-          if (config.debug) logger.info('office error %s', file.name)
+          if (config.debug) logger.info('office error %s %s', file.name, errorMessage(error))
           logger.warn(error)
         }
       }
@@ -302,6 +308,10 @@ function createDocHttp(http: HTTP) {
       }
     },
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'unknown'
 }
 
 function cookiesFromHeaders(headers: Headers): string | undefined {

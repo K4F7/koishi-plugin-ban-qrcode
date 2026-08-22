@@ -5,6 +5,8 @@ const INVITE_APPS = new Set([
   'com.tencent.troopsharecard',
 ])
 
+const GROUP_PROMPT = /群名片|\[QQ名片\]群|推荐群聊|邀请你加入群聊|邀请加入群聊/
+
 export function normalizeShare(payload: string): string {
   let text = payload.trim()
   const wrapped = /^\[(?:CQ:)?json(?:,data=|:data=)/i.exec(text)
@@ -14,8 +16,12 @@ export function normalizeShare(payload: string): string {
 
 export function isGroupInviteCard(payload: string): boolean {
   const raw = normalizeShare(payload)
-  const json = tryParseJson(raw)
+  if (isContactGroupSegment(raw)) return true
+
+  const json = readShareJson(raw)
   if (json) {
+    if (isContactGroupRecord(json)) return true
+
     const app = String(json.app ?? '')
     if (INVITE_APPS.has(app)) return true
 
@@ -24,18 +30,25 @@ export function isGroupInviteCard(payload: string): boolean {
 
     const contact = isRecord(json.meta) ? json.meta.contact : undefined
     if (isRecord(contact)) {
-      if (contact.tag === '推荐好友' || String(contact.jumpUrl ?? '').includes('source=sharecard')) return false
-      if (contact.tag === '群名片') return true
-      if (String(contact.jumpUrl ?? '').includes('card_type=group')) return true
-      if (String(contact.pcJumpUrl ?? '').includes('groupwpa')) return true
+      const jumpUrl = String(contact.jumpUrl ?? '')
+      const pcJumpUrl = String(contact.pcJumpUrl ?? '')
+      const avatar = String(contact.avatar ?? '')
+      if (
+        contact.tag === '群名片'
+        || jumpUrl.includes('card_type=group')
+        || pcJumpUrl.includes('groupwpa')
+        || avatar.includes('p.qlogo.cn/gh/')
+      ) return true
+      if (contact.tag === '推荐好友' || jumpUrl.includes('source=sharecard')) return false
     }
 
     const prompt = String(json.prompt ?? '')
-    if (/群名片\s*:/.test(prompt) || /推荐群聊|邀请你加入群聊|邀请加入群聊/.test(prompt)) return true
+    const desc = String(json.desc ?? '')
+    if (GROUP_PROMPT.test(prompt) || GROUP_PROMPT.test(desc)) return true
     if (bizsrc.includes('cardshare')) return false
   }
 
-  if (/brief=["']\[推荐群\]["']|brief=["']\[邀请加群\]["']/.test(raw)) return true
+  if (/brief=["']\[(?:推荐群|邀请加群|群名片)\]["']/.test(raw)) return true
   if ((/邀请你加入群聊|邀请加入群聊/.test(raw)) && (/serviceID=/.test(raw) || /com\.tencent\.qun/.test(raw))) return true
   return false
 }
@@ -86,6 +99,28 @@ export function extractShareCardText(payload: string): string {
   add(/<summary[^>]*>([^<]+)/i.exec(raw)?.[1])
   add(/<desc[^>]*>([^<]+)/i.exec(raw)?.[1])
   return chunks.join('\n')
+}
+
+function readShareJson(text: string): Record<string, unknown> | null {
+  const json = tryParseJson(text)
+  if (!json) return null
+  if (typeof json.app === 'string') return json
+  if (typeof json.data === 'string') {
+    const inner = tryParseJson(normalizeShare(json.data))
+    if (inner) return inner
+  }
+  return json
+}
+
+function isContactGroupSegment(raw: string): boolean {
+  return /\[(?:CQ:)?contact(?:,|\.)[^\]]*type=group/i.test(raw)
+}
+
+function isContactGroupRecord(json: Record<string, unknown>): boolean {
+  const type = String(json.type ?? '').toLowerCase()
+  if (type !== 'group' && type !== '群') return false
+  if (json.app) return false
+  return Boolean(json.id || json.qq || json.uin)
 }
 
 function tryParseJson(text: string): Record<string, unknown> | null {
