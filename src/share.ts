@@ -40,6 +40,54 @@ export function isGroupInviteCard(payload: string): boolean {
   return false
 }
 
+export function isTencentDocCard(payload: string): boolean {
+  return /腾讯文档|docs\.qq\.com|doc\.weixin\.qq\.com/i.test(normalizeShare(payload))
+}
+
+export function extractShareCardText(payload: string): string {
+  const raw = normalizeShare(payload)
+  const json = tryParseJson(raw)
+  if (json) {
+    const chunks: string[] = []
+    const seen = new Set<string>()
+    const add = (value: unknown) => {
+      if (typeof value !== 'string') return
+      const text = value.trim()
+      if (!text || seen.has(text)) return
+      seen.add(text)
+      chunks.push(text)
+    }
+    add(json.prompt)
+    add(json.desc)
+    if (isRecord(json.meta)) {
+      for (const item of Object.values(json.meta)) {
+        if (!isRecord(item)) continue
+        add(item.title)
+        add(item.desc)
+        add(item.prompt)
+        add(item.tag)
+        add(item.summary)
+        add(item.brief)
+      }
+    }
+    return chunks.join('\n')
+  }
+
+  const chunks: string[] = []
+  const seen = new Set<string>()
+  const add = (value?: string) => {
+    const text = value?.trim()
+    if (!text || seen.has(text)) return
+    seen.add(text)
+    chunks.push(text)
+  }
+  add(/brief=["']([^"']+)["']/i.exec(raw)?.[1])
+  add(/<title[^>]*>([^<]+)/i.exec(raw)?.[1])
+  add(/<summary[^>]*>([^<]+)/i.exec(raw)?.[1])
+  add(/<desc[^>]*>([^<]+)/i.exec(raw)?.[1])
+  return chunks.join('\n')
+}
+
 function tryParseJson(text: string): Record<string, unknown> | null {
   try {
     const value = JSON.parse(text)

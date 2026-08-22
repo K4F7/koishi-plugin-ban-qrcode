@@ -15,7 +15,7 @@ import {
 } from './detect'
 import { collectTencentDocUrls, extractOfficeText, fetchTencentDoc } from './document'
 import { createFileResolver, decodeQr, downloadImage, warmupQrDecoder } from './qrcode'
-import { isGroupInviteCard } from './share'
+import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from './share'
 
 export const name = 'ban-qrcode'
 
@@ -99,9 +99,11 @@ export function apply(ctx: Context, config: Config) {
       ? collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n'))
       : []
     const officeFiles = config.scanDocs ? parts.files.filter(file => isOfficeFile(file.name)) : []
+    const docCards = config.scanDocs ? parts.shares.filter(isTencentDocCard) : []
+    const docCardText = docCards.map(extractShareCardText).filter(Boolean).join('\n')
     const needInvite = config.scanGroupInvite && parts.shares.some(isGroupInviteCard)
     const needQr = config.scanQrcode && parts.images.length > 0
-    const needDocs = Boolean(docUrls.length || officeFiles.length)
+    const needDocs = Boolean(docUrls.length || officeFiles.length || docCards.length)
 
     if (config.debug) {
       logger.info(
@@ -129,17 +131,21 @@ export function apply(ctx: Context, config: Config) {
       }
 
       if (needQr) {
-        const hit = await findQrInImages(
-          parts.images,
-          download,
-          decodeQr,
-          (src, status) => {
-            if (config.debug) logger.info('qr %s %s', status, summarizeSrc(src))
-          },
-        )
-        if (hit) {
-          await enforce(session, config, logger, 'qrcode')
-          return
+        try {
+          const hit = await findQrInImages(
+            parts.images,
+            download,
+            decodeQr,
+            (src, status) => {
+              if (config.debug) logger.info('qr %s %s', status, summarizeSrc(src))
+            },
+          )
+          if (hit) {
+            await enforce(session, config, logger, 'qrcode')
+            return
+          }
+        } catch (error) {
+          logger.warn(error)
         }
       }
 
@@ -148,6 +154,7 @@ export function apply(ctx: Context, config: Config) {
         return
       }
 
+      let fetchedDoc = false
       for (const url of docUrls) {
         try {
           const doc = await fetchTencentDoc(docHttp, url)
@@ -155,6 +162,7 @@ export function apply(ctx: Context, config: Config) {
             if (config.debug) logger.info('doc empty %s', url)
             continue
           }
+          if (doc.text.trim()) fetchedDoc = true
           const ad = detectAdContent(doc.text, doc.title, config.adKeywords)
           if (config.debug) {
             logger.info('doc %s title=%s ad=%s images=%d', url, doc.title || '-', Boolean(ad), doc.images.length)
@@ -178,7 +186,17 @@ export function apply(ctx: Context, config: Config) {
             }
           }
         } catch (error) {
+          if (config.debug) logger.info('doc error %s', url)
           logger.warn(error)
+        }
+      }
+
+      if (!fetchedDoc && docCardText) {
+        const ad = detectAdContent(docCardText, '', config.adKeywords)
+        if (config.debug) logger.info('doc card ad=%s', Boolean(ad))
+        if (ad) {
+          await enforce(session, config, logger, 'ad-doc')
+          return
         }
       }
 
@@ -192,6 +210,7 @@ export function apply(ctx: Context, config: Config) {
             return
           }
         } catch (error) {
+          if (config.debug) logger.info('office error %s', file.name)
           logger.warn(error)
         }
       }
@@ -259,7 +278,11 @@ function looksRelevant(
 ) {
   if (config.scanQrcode && parts.images.length) return true
   if (config.scanGroupInvite && parts.shares.length) return true
-  if (config.scanDocs && (parts.files.some(file => isOfficeFile(file.name)) || collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')).length)) {
+  if (config.scanDocs && (
+    parts.files.some(file => isOfficeFile(file.name))
+    || collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')).length
+    || parts.shares.some(isTencentDocCard)
+  )) {
     return true
   }
   return false

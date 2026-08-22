@@ -14,21 +14,29 @@ type WechatScan = (input: {
 let wechatScan: WechatScan | undefined
 let wechatLoad: Promise<WechatScan | null> | undefined
 
-export function createFileResolver(bot: { internal?: Record<string, unknown> }) {
+type FileInternal = {
+  getImage?(src: string): unknown
+}
+
+export function createFileResolver(bot: { internal?: FileInternal }) {
   return async (src: string): Promise<Buffer | string | null> => {
-    const getImage = bot.internal?.getImage
-    if (typeof getImage !== 'function') return null
-    const info = unwrapFileInfo(await getImage(src))
-    if (!info) return null
-    if (typeof info.base64 === 'string' && info.base64) {
-      return Buffer.from(info.base64, 'base64')
+    const internal = bot.internal
+    if (!internal) return null
+    try {
+      const info = unwrapFileInfo(await internal.getImage?.(src))
+      if (!info) return null
+      if (typeof info.base64 === 'string' && info.base64) {
+        return Buffer.from(info.base64, 'base64')
+      }
+      if (typeof info.url === 'string' && isDownloadableSrc(info.url)) return info.url
+      if (typeof info.file === 'string' && info.file) {
+        if (isDownloadableSrc(info.file)) return info.file
+        return readFile(info.file)
+      }
+      return null
+    } catch {
+      return null
     }
-    if (typeof info.url === 'string' && isDownloadableSrc(info.url)) return info.url
-    if (typeof info.file === 'string' && info.file) {
-      if (isDownloadableSrc(info.file)) return info.file
-      return readFile(info.file)
-    }
-    return null
   }
 }
 
@@ -38,19 +46,27 @@ export async function downloadImage(
   resolveFile?: (src: string) => Promise<Buffer | string | null>,
 ): Promise<Buffer> {
   let lastError: unknown
-  if (src.startsWith('data:') || src.startsWith('file:') || /^https?:/i.test(src)) {
+  const remote = /^https?:/i.test(src)
+  if (isDownloadableSrc(src)) {
     try {
       return await downloadDirect(http, src)
     } catch (error) {
       lastError = error
     }
+    if (!remote) {
+      throw lastError instanceof Error ? lastError : new Error('cannot download image')
+    }
   }
 
   if (resolveFile) {
-    const resolved = await resolveFile(src)
-    if (Buffer.isBuffer(resolved)) return resolved
-    if (typeof resolved === 'string' && resolved && resolved !== src) {
-      return downloadDirect(http, resolved)
+    try {
+      const resolved = await resolveFile(src)
+      if (Buffer.isBuffer(resolved)) return resolved
+      if (typeof resolved === 'string' && resolved && resolved !== src) {
+        return downloadDirect(http, resolved)
+      }
+    } catch (error) {
+      lastError = lastError ?? error
     }
   }
 

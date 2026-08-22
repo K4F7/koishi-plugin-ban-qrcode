@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-ban-qrcode",
   "description": "检测到群内二维码、拉群卡片或文档广告后自动撤回并禁言",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

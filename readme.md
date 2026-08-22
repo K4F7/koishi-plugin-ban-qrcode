@@ -275,7 +275,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.1.1**：补齐跳过原因日志，并用 `http.file` / OneBot `get_image` 与微信扫码器提高二维码、文档链接检出率。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
+当前版本 **1.1.2**：修复 OneBot `getImage` 未绑定导致的生产崩溃，扫码失败不再跳过腾讯文档检测；文档分享卡按广告关键词兜底，而不是只看「大一新生必备清单」标题。1.1.1 补齐跳过原因日志，并用 `http.file` / OneBot `get_image` 与微信扫码器提高检出率。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 

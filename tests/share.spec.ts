@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { detectAdContent } from '../src/ad'
 import { collectMessageParts } from '../src/detect'
-import { isGroupInviteCard } from '../src/share'
+import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from '../src/share'
 
 const groupCard = JSON.stringify({
   app: 'com.tencent.contact.lua',
@@ -59,6 +60,35 @@ describe('isGroupInviteCard', () => {
     assert.equal(isGroupInviteCard(friendCard), false)
     assert.equal(isGroupInviteCard(docCard), false)
     assert.equal(isGroupInviteCard('普通文本邀请大家晚上一起自习'), false)
+  })
+})
+
+describe('tencent doc share cards', () => {
+  it('reads title prompt and desc without treating a checklist title as an ad', () => {
+    assert.equal(isTencentDocCard(docCard), true)
+    const text = extractShareCardText(docCard)
+    assert.match(text, /腾讯文档/)
+    assert.match(text, /大一新生必备清单/)
+    assert.equal(detectAdContent(text, ''), null)
+  })
+
+  it('flags a share card when desc already contains ad keywords', () => {
+    const adCard = JSON.stringify({
+      app: 'com.tencent.structmsg',
+      prompt: '[腾讯文档] 大一新生必备清单',
+      meta: {
+        news: {
+          title: '大一新生必备清单',
+          desc: '校园麦芽送货到寝，联系本校的负责人',
+          jumpUrl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+          tag: '腾讯文档',
+        },
+      },
+    })
+    const text = extractShareCardText(adCard)
+    const hit = detectAdContent(text, '')
+    assert.ok(hit)
+    assert.ok(hit.matches.includes('校园麦芽'))
   })
 })
 
