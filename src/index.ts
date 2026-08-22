@@ -41,6 +41,7 @@ export interface Config {
   scanGroupInvite: boolean
   scanDocs: boolean
   adKeywords: string[]
+  maxOfficeMb: number
   debug: boolean
 }
 
@@ -56,6 +57,7 @@ export const Config: Schema<Config> = Schema.object({
   scanGroupInvite: Schema.boolean().default(true).description('拦截邀请 / 推荐群聊 / 群名片分享卡。'),
   scanDocs: Schema.boolean().default(true).description('检查腾讯文档和 Word / 文本附件里的广告。'),
   adKeywords: Schema.array(Schema.string()).role('table').default([]).description('额外广告关键词。命中即撤回。'),
+  maxOfficeMb: Schema.number().min(1).default(5).description('解析 Word / 文本附件的大小上限（MB）。超出则跳过，防止解压占用过多内存。'),
   debug: Schema.boolean().default(true).description('输出调试日志：跳过原因、消息结构、下载/扫码/文档结果。'),
 })
 
@@ -208,6 +210,7 @@ export function apply(ctx: Context, config: Config) {
           const doc = extractOfficeText(
             await downloadFile(ctx.http, { ...file, groupId: guildId }, resolveFile),
             file.name,
+            Math.floor(config.maxOfficeMb * 1024 * 1024),
           )
           const ad = doc ? detectAdContent(doc.text, doc.title || file.name, config.adKeywords) : null
           if (config.debug) logger.info('office %s ad=%s', file.name, Boolean(ad))

@@ -94,6 +94,7 @@ npm run build
 | `scanGroupInvite` | `boolean` | `true` | 拦截邀请 / 推荐群聊分享卡 |
 | `scanDocs` | `boolean` | `true` | 检查腾讯文档和 Word / 文本附件 |
 | `adKeywords` | `string[]` | `[]` | 额外广告关键词，命中即撤回 |
+| `maxOfficeMb` | `number` | `5` | Word / 文本附件的大小上限（MB），超出则跳过 |
 | `debug` | `boolean` | `true` | 输出调试日志：跳过原因、消息结构、下载 / 扫码 / 文档结果 |
 
 内置词在 `src/ad-keywords.txt`，一行一条。`[strong]` 命中任意一条即撤回；`[commerce]` 要同时出现床品类用词且至少两条。控制台 `adKeywords` 按强匹配叠加。
@@ -278,7 +279,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.2.0**：内置广告词改到 `ad-keywords.txt` 维护，控制台 `adKeywords` 仍作额外强匹配。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
+当前版本 **1.2.1**：Word / 文本附件默认限制 5MB（`maxOfficeMb`），防止解压占用过多内存。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 

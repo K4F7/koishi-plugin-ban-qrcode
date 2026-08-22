@@ -5,6 +5,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const DOC_RE = /https?:\/\/(?:docs\.qq\.com|doc\.weixin\.qq\.com)\/(doc|sheet|slide|pdf|form|mind)\/([A-Za-z0-9]+)/i
 const ZIP_LOCAL = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const IMAGE_RE = /https?:\/\/docimg\d+\.docs\.qq\.com\/image\/[A-Za-z0-9_-]+(?:\.(?:jpe?g|png|webp))?/gi
+export const DEFAULT_MAX_OFFICE_BYTES = 5 * 1024 * 1024
 
 export interface DocContent {
   title: string
@@ -93,14 +94,19 @@ export async function fetchTencentDoc(http: DocHttp, url: string): Promise<DocCo
   return parseOpendocBody(opendoc.body)
 }
 
-export function extractOfficeText(buffer: Buffer, name: string): DocContent | null {
+export function extractOfficeText(
+  buffer: Buffer,
+  name: string,
+  maxBytes = DEFAULT_MAX_OFFICE_BYTES,
+): DocContent | null {
+  if (buffer.length > maxBytes) return null
   const lower = name.toLowerCase()
   if (lower.endsWith('.txt')) {
     const text = buffer.toString('utf8').trim()
     return text ? { title: name, text, images: [] } : null
   }
   if (lower.endsWith('.docx')) {
-    const xml = readZipEntry(buffer, 'word/document.xml')
+    const xml = readZipEntry(buffer, 'word/document.xml', maxBytes)
     if (!xml) return null
     const text = xml
       .replace(/<w:tab\/>/g, '\t')
@@ -176,7 +182,7 @@ function extractUtf16LeText(buffer: Buffer): string {
   return chars.join('\n')
 }
 
-function readZipEntry(buffer: Buffer, suffix: string): string | null {
+function readZipEntry(buffer: Buffer, suffix: string, maxBytes: number): string | null {
   let offset = 0
   while (offset < buffer.length) {
     const found = buffer.indexOf(ZIP_LOCAL, offset)
@@ -184,6 +190,7 @@ function readZipEntry(buffer: Buffer, suffix: string): string | null {
     if (found + 30 > buffer.length) return null
     const method = buffer.readUInt16LE(found + 8)
     const compSize = buffer.readUInt32LE(found + 18)
+    const uncompSize = buffer.readUInt32LE(found + 22)
     const nameLen = buffer.readUInt16LE(found + 26)
     const extraLen = buffer.readUInt16LE(found + 28)
     const nameStart = found + 30
@@ -191,9 +198,16 @@ function readZipEntry(buffer: Buffer, suffix: string): string | null {
     if (dataStart + compSize > buffer.length) return null
     const name = buffer.subarray(nameStart, nameStart + nameLen).toString('utf8')
     if (name === suffix || name.endsWith(`/${suffix}`)) {
+      if (uncompSize > 0 && uncompSize <= 0xffff_fffe && uncompSize > maxBytes) return null
       const data = buffer.subarray(dataStart, dataStart + compSize)
-      if (method === 0) return data.toString('utf8')
-      if (method === 8) return inflateRawSync(data).toString('utf8')
+      if (method === 0) return data.length > maxBytes ? null : data.toString('utf8')
+      if (method === 8) {
+        try {
+          return inflateRawSync(data, { maxOutputLength: maxBytes }).toString('utf8')
+        } catch {
+          return null
+        }
+      }
     }
     offset = dataStart + Math.max(compSize, 1)
   }

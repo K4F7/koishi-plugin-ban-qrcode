@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
+import { deflateRawSync } from 'node:zlib'
 import { describe, it } from 'node:test'
 import {
+  DEFAULT_MAX_OFFICE_BYTES,
   collectTencentDocUrls,
   extractOfficeText,
   fetchTencentDoc,
@@ -8,17 +10,25 @@ import {
   parseTencentDocUrl,
 } from '../src/document'
 
-function zipStore(name: string, content: string): Buffer {
-  const data = Buffer.from(content, 'utf8')
+function zipLocal(name: string, data: Buffer, method: number, uncompSize: number): Buffer {
   const nameBuf = Buffer.from(name)
   const header = Buffer.alloc(30)
   header.writeUInt32LE(0x04034b50, 0)
   header.writeUInt16LE(20, 4)
-  header.writeUInt16LE(0, 8)
+  header.writeUInt16LE(method, 8)
   header.writeUInt32LE(data.length, 18)
-  header.writeUInt32LE(data.length, 22)
+  header.writeUInt32LE(uncompSize, 22)
   header.writeUInt16LE(nameBuf.length, 26)
   return Buffer.concat([header, nameBuf, data])
+}
+
+function zipStore(name: string, content: string): Buffer {
+  const data = Buffer.from(content, 'utf8')
+  return zipLocal(name, data, 0, data.length)
+}
+
+function zipDeflate(name: string, content: Buffer): Buffer {
+  return zipLocal(name, deflateRawSync(content), 8, content.length)
 }
 
 describe('tencent doc urls', () => {
@@ -106,5 +116,22 @@ describe('extractOfficeText', () => {
 
     const txt = extractOfficeText(Buffer.from('普通清单：牙刷牙膏'), '清单.txt')
     assert.equal(txt?.text, '普通清单：牙刷牙膏')
+  })
+
+  it('skips office files that exceed the configured size cap', () => {
+    const xml = '<?xml version="1.0"?><w:document><w:p><w:r><w:t>校园麦芽送货到寝</w:t></w:r></w:p></w:document>'
+    const inflated = Buffer.concat([
+      Buffer.from('<?xml version="1.0"?><w:document><w:p><w:r><w:t>', 'utf8'),
+      Buffer.alloc(DEFAULT_MAX_OFFICE_BYTES + 1, 0x61),
+      Buffer.from('</w:t></w:r></w:p></w:document>', 'utf8'),
+    ])
+
+    assert.equal(extractOfficeText(Buffer.alloc(DEFAULT_MAX_OFFICE_BYTES + 1, 0x61), '清单.txt'), null)
+    assert.equal(extractOfficeText(zipStore('word/document.xml', xml), '清单.docx', xml.length - 1), null)
+    assert.equal(extractOfficeText(zipDeflate('word/document.xml', inflated), '清单.docx'), null)
+    assert.equal(extractOfficeText(zipLocal('word/document.xml', deflateRawSync(inflated), 8, 0), '清单.docx'), null)
+
+    const deflated = extractOfficeText(zipDeflate('word/document.xml', Buffer.from(xml, 'utf8')), '清单.docx')
+    assert.match(deflated?.text ?? '', /校园麦芽送货到寝/)
   })
 })
