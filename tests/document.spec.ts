@@ -1,0 +1,107 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+import {
+  collectTencentDocUrls,
+  extractOfficeText,
+  fetchTencentDoc,
+  parseOpendocBody,
+  parseTencentDocUrl,
+} from '../src/document'
+
+function zipStore(name: string, content: string): Buffer {
+  const data = Buffer.from(content, 'utf8')
+  const nameBuf = Buffer.from(name)
+  const header = Buffer.alloc(30)
+  header.writeUInt32LE(0x04034b50, 0)
+  header.writeUInt16LE(20, 4)
+  header.writeUInt16LE(0, 8)
+  header.writeUInt32LE(data.length, 18)
+  header.writeUInt32LE(data.length, 22)
+  header.writeUInt16LE(nameBuf.length, 26)
+  return Buffer.concat([header, nameBuf, data])
+}
+
+describe('tencent doc urls', () => {
+  it('parses docs.qq.com links and keeps the first unique id', () => {
+    assert.deepEqual(parseTencentDocUrl('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh?_t=1'), {
+      kind: 'doc',
+      id: 'DWHNhYk1iZVZMY1Rh',
+      pageUrl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    })
+    assert.deepEqual(collectTencentDocUrls([
+      '看 https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh 和 https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+      'https://example.test/other',
+    ].join('\n')), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+  })
+})
+
+describe('parseOpendocBody', () => {
+  it('reads title, chinese text, and embedded images from jsonp', () => {
+    const payload = {
+      clientVars: {
+        title: '大一新生必备清单(详细版)(2) (1)',
+        collab_client_vars: {
+          initialAttributedText: {
+            text: [
+              Buffer.from('校园麦芽送货到寝买被子 https://docimg6.docs.qq.com/image/AgAAEQOd.jpeg', 'utf8').toString('base64'),
+            ],
+          },
+        },
+      },
+    }
+    const doc = parseOpendocBody(`clientVarsCallback(${JSON.stringify(payload)})`)
+    assert.equal(doc?.title, '大一新生必备清单(详细版)(2) (1)')
+    assert.match(doc?.text ?? '', /校园麦芽/)
+    assert.deepEqual(doc?.images, ['https://docimg6.docs.qq.com/image/AgAAEQOd.jpeg'])
+  })
+})
+
+describe('fetchTencentDoc', () => {
+  it('opens the public page then the opendoc jsonp with cookies', async () => {
+    const calls: Array<{ url: string, headers?: Record<string, string> }> = []
+    const doc = await fetchTencentDoc({
+      async text(url, headers) {
+        calls.push({ url, headers })
+        if (url.includes('/doc/')) {
+          return {
+            body: '<link href="//docs.qq.com/dop-api/opendoc?id=DWHNhYk1iZVZMY1Rh&callback=clientVarsCallback">',
+            cookies: 'TOK=abc',
+          }
+        }
+        return {
+          body: `clientVarsCallback(${JSON.stringify({
+            clientVars: {
+              title: '清单',
+              collab_client_vars: {
+                initialAttributedText: { text: ['校园麦芽送货到寝'] },
+              },
+            },
+          })})`,
+        }
+      },
+    }, 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh')
+
+    assert.equal(doc?.title, '清单')
+    assert.match(doc?.text ?? '', /校园麦芽/)
+    assert.equal(calls[0]?.url, 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh')
+    assert.match(calls[1]?.url ?? '', /opendoc/)
+    assert.equal(calls[1]?.headers?.cookie, 'TOK=abc')
+    assert.equal(calls[1]?.headers?.referer, 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh')
+  })
+})
+
+describe('extractOfficeText', () => {
+  it('reads advertising copy from docx xml and utf-16 doc files', () => {
+    const xml = '<?xml version="1.0"?><w:document><w:p><w:r><w:t>校园麦芽送货到寝</w:t></w:r></w:p></w:document>'
+    const docx = extractOfficeText(zipStore('word/document.xml', xml), '大一新生必备清单.docx')
+    assert.match(docx?.text ?? '', /校园麦芽送货到寝/)
+
+    const doc = extractOfficeText(Buffer.from('校园麦芽送货到寝', 'utf16le'), '清单.doc')
+    assert.match(doc?.text ?? '', /校园麦芽/)
+
+    const txt = extractOfficeText(Buffer.from('普通清单：牙刷牙膏'), '清单.txt')
+    assert.equal(txt?.text, '普通清单：牙刷牙膏')
+  })
+})

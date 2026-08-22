@@ -84,6 +84,8 @@ describe('helpers', () => {
   it('builds a notify line from mute seconds', () => {
     assert.equal(defaultNotify(60), '检测到二维码，已撤回并禁言 60 秒。')
     assert.equal(defaultNotify(0), '检测到二维码，已撤回。')
+    assert.equal(defaultNotify(60, 'group-invite'), '检测到拉群卡片，已撤回并禁言 60 秒。')
+    assert.equal(defaultNotify(0, 'ad-doc'), '检测到文档广告，已撤回。')
   })
 })
 

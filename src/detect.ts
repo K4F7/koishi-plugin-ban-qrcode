@@ -22,6 +22,21 @@ export interface QrHit {
   text: string
 }
 
+export type HitReason = 'qrcode' | 'group-invite' | 'ad-doc'
+
+export interface FileRef {
+  src: string
+  name: string
+}
+
+export interface MessageParts {
+  images: string[]
+  shares: string[]
+  files: FileRef[]
+  urls: string[]
+  text: string
+}
+
 const ADMIN_ROLES = new Set([
   'owner',
   'admin',
@@ -47,17 +62,57 @@ export function isAdminRole(roles?: RoleLike[]): boolean {
   return roleLabels(roles).some(role => ADMIN_ROLES.has(role) || role.toLowerCase() === 'owner')
 }
 
+const SHARE_TYPES = new Set(['json', 'xml', 'share', 'ark', 'lightapp'])
+const FILE_TYPES = new Set(['file'])
+const OFFICE_FILE = /\.(docx?|txt)$/i
+
 export function collectImageSrcs(nodes: readonly ImageNode[]): string[] {
-  const srcs: string[] = []
-  const seen = new Set<string>()
+  return collectMessageParts(nodes).images
+}
+
+export function isOfficeFile(name: string): boolean {
+  return OFFICE_FILE.test(name)
+}
+
+export function collectMessageParts(nodes: readonly ImageNode[], extra = ''): MessageParts {
+  const images: string[] = []
+  const shares: string[] = []
+  const files: FileRef[] = []
+  const texts: string[] = []
+  const seenImage = new Set<string>()
+  const seenShare = new Set<string>()
+  const seenFile = new Set<string>()
+
+  const addShare = (raw: unknown) => {
+    if (typeof raw !== 'string' || !raw.trim()) return
+    const value = raw.trim()
+    if (seenShare.has(value)) return
+    seenShare.add(value)
+    shares.push(value)
+  }
 
   const visit = (items: readonly ImageNode[]) => {
     for (const node of items) {
       if (node.type === 'img' || node.type === 'image') {
         const src = pickSrc(node.attrs)
-        if (src && !seen.has(src)) {
-          seen.add(src)
-          srcs.push(src)
+        if (src && !seenImage.has(src)) {
+          seenImage.add(src)
+          images.push(src)
+        }
+      }
+      if (node.type === 'text' || node.type === 'plain') {
+        const content = node.attrs?.content ?? node.attrs?.text
+        if (typeof content === 'string' && content) texts.push(content)
+      }
+      if (SHARE_TYPES.has(node.type)) {
+        addShare(node.attrs?.data ?? node.attrs?.content ?? node.attrs?.value)
+      }
+      if (FILE_TYPES.has(node.type)) {
+        const src = pickSrc(node.attrs)
+        const name = String(node.attrs?.filename ?? node.attrs?.name ?? node.attrs?.file ?? '')
+        if (src && !seenFile.has(src)) {
+          seenFile.add(src)
+          files.push({ src, name })
         }
       }
       if (node.children?.length) visit(node.children)
@@ -65,7 +120,43 @@ export function collectImageSrcs(nodes: readonly ImageNode[]): string[] {
   }
 
   visit(nodes)
-  return srcs
+
+  if (extra) {
+    texts.push(extra)
+    for (const match of extra.matchAll(/\[(?:CQ:)?json(?:,data=|:data=)([\s\S]+?)\]/gi)) addShare(match[1])
+    for (const match of extra.matchAll(/\[(?:CQ:)?xml(?:,data=|:data=)([\s\S]+?)\]/gi)) addShare(match[1])
+    for (const match of extra.matchAll(/<(?:json|xml)\s[^>]*\bdata="([^"]+)"/gi)) addShare(decodeEntities(match[1]))
+  }
+
+  const text = texts.join('\n')
+  return {
+    images,
+    shares,
+    files,
+    urls: collectUrls([text, ...shares].join('\n')),
+    text,
+  }
+}
+
+export function collectUrls(text: string): string[] {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+    const url = decodeEntities(match[0]).replace(/[),.;]+$/, '')
+    if (!url || seen.has(url)) continue
+    seen.add(url)
+    urls.push(url)
+  }
+  return urls
+}
+
+export function decodeEntities(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
 }
 
 function pickSrc(attrs?: Record<string, unknown>): string | undefined {
@@ -97,9 +188,16 @@ export function parseDataUrl(src: string): Buffer | null {
   }
 }
 
-export function defaultNotify(muteSeconds: number): string {
-  if (muteSeconds <= 0) return '检测到二维码，已撤回。'
-  return `检测到二维码，已撤回并禁言 ${muteSeconds} 秒。`
+const NOTIFY_LABEL: Record<HitReason, string> = {
+  qrcode: '二维码',
+  'group-invite': '拉群卡片',
+  'ad-doc': '文档广告',
+}
+
+export function defaultNotify(muteSeconds: number, reason: HitReason = 'qrcode'): string {
+  const label = NOTIFY_LABEL[reason]
+  if (muteSeconds <= 0) return `检测到${label}，已撤回。`
+  return `检测到${label}，已撤回并禁言 ${muteSeconds} 秒。`
 }
 
 export async function findQrInImages(

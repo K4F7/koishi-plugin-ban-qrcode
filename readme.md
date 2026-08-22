@@ -6,17 +6,19 @@
 [![Koishi](https://img.shields.io/badge/Koishi-4-026d4d?style=flat-square)](https://koishi.chat/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/K4F7/koishi-plugin-ban-qrcode/pulls)
 
-群内检测到图片二维码时自动撤回，并禁言发送者（默认 1 分钟）。用于群管理、拦截广告码。
+群内检测到图片二维码、邀请 / 推荐群聊分享卡，或「大一新生必备清单」一类文档里的卖货广告时，自动撤回并禁言发送者（默认 1 分钟）。
 
-Recall group QR-code images and mute the sender for one minute by default, to stop advertising codes.
+Recall QR-code images, group-invite share cards, and freshman-list document ads, then mute the sender for one minute by default.
 
 ## Features
 
 - 🔍 **扫图识码**：下载消息里的图片，解码是否含二维码
+- 📎 **拉群卡片**：识别 QQ 邀请加群 / 推荐群聊 / 群名片分享卡
+- 📄 **文档广告**：拉取腾讯文档或 Word / 文本附件正文，识别夹带的床品推销等广告
 - 🗑️ **自动撤回**：命中后立刻撤回原消息
 - 🔇 **自动禁言**：默认禁言 60 秒，秒数可配
 - 🛡️ **白名单**：默认跳过群主 / 管理员，也可按用户 ID、群 ID 过滤
-- 💬 **群内提示**：处理后可发一句说明，不回显码内内容
+- 💬 **群内提示**：处理后可发一句说明，不回显码内内容或广告原文
 
 ## Quick Start
 
@@ -26,7 +28,7 @@ Recall group QR-code images and mute the sender for one minute by default, to st
 npm install koishi-plugin-ban-qrcode
 ```
 
-启用后，群成员发带二维码的图片会被撤回并禁言 1 分钟。机器人需要**撤回消息**和**禁言成员**的权限。
+启用后，群成员发带二维码的图片、拉群分享卡，或夹带卖货广告的腾讯文档 / Word，会被撤回并禁言 1 分钟。机器人需要**撤回消息**和**禁言成员**的权限。
 
 依赖 Koishi 的 `http` 服务（`inject: ['http']`）。
 
@@ -67,32 +69,37 @@ npm run build
 
 ## Usage
 
-插件没有指令。启用后监听群消息：
+插件没有指令。启用后监听群消息，命中任一项则按同一套流程撤回、禁言、提示：
 
 1. 只处理群聊，忽略私聊和机器人自己的消息
-2. 收集消息及引用里的 `img` / `image`
-3. 下载图片并解码二维码
-4. 命中则撤回、禁言，可选发送提示
+2. 图片二维码：收集 `img` / `image`，下载后解码
+3. 拉群卡片：识别 `json` / `xml` 分享卡（`com.tencent.qun.invite`、群名片、`[推荐群]` 等）
+4. 文档广告：从文本、分享卡里取出 `docs.qq.com` 链接，或下载 `.doc` / `.docx` / `.txt`，识别夹带的推销文案（例如校园床品「送货到寝」）
+5. 文档里的图也会再扫一遍二维码
 
-不会把解码出的文本发回群里，避免扩散广告链接。
+不会把解码出的文本或广告原文发回群里。纯物品清单（只写「被子、枕头」而没有推销）不会误杀。
 
 ## Configuration
 
 | 项 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `muteSeconds` | `number` | `60` | 禁言秒数。`0` 表示只撤回不禁言 |
-| `recall` | `boolean` | `true` | 撤回含二维码的消息 |
+| `recall` | `boolean` | `true` | 撤回违规消息 |
 | `notify` | `boolean` | `true` | 处理后在群内提示 |
-| `notifyText` | `string` | `''` | 自定义提示。留空则按秒数生成 |
+| `notifyText` | `string` | `''` | 自定义提示。留空则按原因和秒数生成 |
 | `skipAdmins` | `boolean` | `true` | 跳过群主 / 管理员 |
 | `ignoreUsers` | `string[]` | `[]` | 忽略的用户 ID |
 | `guilds` | `string[]` | `[]` | 只在这些群生效。空数组表示全部群 |
+| `scanQrcode` | `boolean` | `true` | 扫描图片二维码 |
+| `scanGroupInvite` | `boolean` | `true` | 拦截邀请 / 推荐群聊分享卡 |
+| `scanDocs` | `boolean` | `true` | 检查腾讯文档和 Word / 文本附件 |
+| `adKeywords` | `string[]` | `[]` | 额外广告关键词，命中即撤回 |
 
-默认提示：`检测到二维码，已撤回并禁言 60 秒。`
+默认提示按原因变化，例如：`检测到拉群卡片，已撤回并禁言 60 秒。` / `检测到文档广告，已撤回并禁言 60 秒。`
 
 ## API Reference
 
-插件入口导出 `name`、`inject`、`Config`、`apply`。判定与扫码编排在 `src/detect.ts`，下载和解码在 `src/qrcode.ts`。
+插件入口导出 `name`、`inject`、`Config`、`apply`。判定与扫码编排在 `src/detect.ts`，拉群卡在 `src/share.ts`，文档广告在 `src/ad.ts` / `src/document.ts`，下载和解码在 `src/qrcode.ts`。
 
 ### `collectImageSrcs(nodes)`
 
@@ -114,14 +121,20 @@ npm run build
 
 ```
 src/
-├── index.ts    # 插件入口：监听群消息，撤回 / 禁言 / 提示
-├── detect.ts   # 收集图片、是否处理、编排扫码
-└── qrcode.ts   # 下载图片、解码二维码
+├── index.ts      # 插件入口：监听群消息，撤回 / 禁言 / 提示
+├── detect.ts     # 收集图片 / 卡片 / 文件、是否处理、提示语
+├── share.ts      # 识别 QQ 拉群分享卡
+├── ad.ts         # 识别文档里的卖货文案
+├── document.ts   # 拉腾讯文档、抽出 Word / 文本
+└── qrcode.ts     # 下载图片、解码二维码
 tests/
-└── detect.spec.ts
+├── detect.spec.ts
+├── share.spec.ts
+├── ad.spec.ts
+└── document.spec.ts
 ```
 
-数据流：群消息 → 收集图片 URL → 下载 → jsQR → `deleteMessage` + `muteGuildMember`。
+数据流：群消息 → 二维码 / 拉群卡 / 文档正文 → `deleteMessage` + `muteGuildMember`。
 
 禁言时长按 Satori 约定传**毫秒**（60 秒 = `60000`）。
 
@@ -197,6 +210,12 @@ npm run build
 不会。提示语只说明「检测到二维码」，日志也不写码内文本。
 </details>
 
+<details>
+<summary><strong>推荐好友名片也会撤回吗？</strong></summary>
+
+不会。只拦邀请加群、推荐群聊、群名片。推荐好友、腾讯文档新闻卡本身不按拉群卡处理；文档卡会再去拉正文看有没有广告。
+</details>
+
 ## Troubleshooting
 
 **no bot permission / mute failed**
@@ -206,6 +225,10 @@ npm run build
 **图片下载失败**
 
 图床拒绝、过期或需要登录。插件会跳过这张图，继续扫同一条消息里的其它图。
+
+**腾讯文档没拦下来**
+
+链接要能不登录打开。插件走公开页 + `dop-api/opendoc` 抽正文；若文档加密、仅登录可见，或正文里没有推销用语，就不会撤回。真正的物品清单（只列「被子、枕头」）不会当广告。
 
 ## 发布（OIDC Trusted Publishing）
 
@@ -241,7 +264,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 欢迎提 issue 和 PR。
 
 1. Fork 仓库，建分支：`git checkout -b feat/my-change`
-2. 改代码，补测试（`tests/detect.spec.ts`）
+2. 改代码，补测试（`tests/*.spec.ts`）
 3. `npm test` 和 `npm run build` 通过
 4. 开 Pull Request
 
@@ -249,7 +272,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.0.0**：群内扫二维码、自动撤回、默认禁言 60 秒、管理员白名单。
+当前版本 **1.1.0**：在 1.0.0 扫码撤回之外，增加拉群分享卡拦截，以及腾讯文档 / Word 中的床品推销等广告识别。
 
 ## License
 

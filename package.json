@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-ban-qrcode",
-  "description": "检测到群内二维码后自动撤回并禁言，用于防广告",
-  "version": "1.0.0",
+  "description": "检测到群内二维码、拉群卡片或文档广告后自动撤回并禁言",
+  "version": "1.1.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -35,7 +35,9 @@
     "二维码",
     "禁言",
     "撤回",
-    "广告"
+    "广告",
+    "腾讯文档",
+    "拉群"
   ],
   "peerDependencies": {
     "koishi": "^4.18.7"
@@ -54,8 +56,8 @@
   },
   "koishi": {
     "description": {
-      "zh": "检测到群内二维码后自动撤回并禁言，用于防广告",
-      "en": "Recall group QR-code images and mute the sender to stop ads"
+      "zh": "检测到群内二维码、拉群卡片或文档广告后自动撤回并禁言",
+      "en": "Recall QR codes, group-invite cards, and document ads in guild chats"
     },
     "service": {
       "required": [
