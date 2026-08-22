@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { detectAdContent } from '../src/ad'
+import { detectAdContent, parseAdKeywords } from '../src/ad'
 
 const quiltAd = `
 如果你还没有准备床品的话，建议参考校园麦芽
@@ -37,5 +37,19 @@ describe('detectAdContent', () => {
     assert.equal(detectAdContent('今晚一起看球赛', '通知'), null)
     const hit = detectAdContent('今晚一起看球赛', '通知', ['看球赛'])
     assert.deepEqual(hit, { matches: ['看球赛'] })
+  })
+})
+
+describe('parseAdKeywords', () => {
+  it('ignores comments, blanks, and bom, and splits strong vs commerce', () => {
+    const lists = parseAdKeywords('\uFEFF# note\n\n[strong]\n校园麦芽\n\n[commerce]\n买被子\n# skip\n提前预订\n')
+    assert.deepEqual(lists, { strong: ['校园麦芽'], commerce: ['买被子', '提前预订'] })
+  })
+
+  it('treats a flat list as strong keywords', () => {
+    assert.deepEqual(parseAdKeywords('送货到寝\n名额有限'), {
+      strong: ['送货到寝', '名额有限'],
+      commerce: [],
+    })
   })
 })

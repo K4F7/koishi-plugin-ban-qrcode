@@ -96,11 +96,13 @@ npm run build
 | `adKeywords` | `string[]` | `[]` | 额外广告关键词，命中即撤回 |
 | `debug` | `boolean` | `true` | 输出调试日志：跳过原因、消息结构、下载 / 扫码 / 文档结果 |
 
+内置词在 `src/ad-keywords.txt`，一行一条。`[strong]` 命中任意一条即撤回；`[commerce]` 要同时出现床品类用词且至少两条。控制台 `adKeywords` 按强匹配叠加。
+
 默认提示按原因变化，例如：`检测到拉群卡片，已撤回并禁言 60 秒。` / `检测到文档广告，已撤回并禁言 60 秒。`
 
 ## API Reference
 
-插件入口导出 `name`、`inject`、`Config`、`apply`。判定与扫码编排在 `src/detect.ts`，拉群卡在 `src/share.ts`，文档广告在 `src/ad.ts` / `src/document.ts`，下载和解码在 `src/qrcode.ts`。
+插件入口导出 `name`、`inject`、`Config`、`apply`。判定与扫码编排在 `src/detect.ts`，拉群卡在 `src/share.ts`，文档广告在 `src/ad.ts` / `src/ad-keywords.txt` / `src/document.ts`，下载和解码在 `src/qrcode.ts`。内置广告词在 `ad-keywords.txt` 里一行一条；控制台 `adKeywords` 仍是额外覆盖。
 
 ### `collectImageSrcs(nodes)`
 
@@ -122,12 +124,13 @@ npm run build
 
 ```
 src/
-├── index.ts      # 插件入口：监听群消息，撤回 / 禁言 / 提示
-├── detect.ts     # 收集图片 / 卡片 / 文件、是否处理、提示语
-├── share.ts      # 识别 QQ 拉群分享卡
-├── ad.ts         # 识别文档里的卖货文案
-├── document.ts   # 拉腾讯文档、抽出 Word / 文本
-└── qrcode.ts     # 下载图片、解码二维码
+├── index.ts           # 插件入口：监听群消息，撤回 / 禁言 / 提示
+├── detect.ts          # 收集图片 / 卡片 / 文件、是否处理、提示语
+├── share.ts           # 识别 QQ 拉群分享卡
+├── ad.ts              # 识别文档里的卖货文案
+├── ad-keywords.txt    # 内置广告关键词，一行一条
+├── document.ts        # 拉腾讯文档、抽出 Word / 文本
+└── qrcode.ts          # 下载图片、解码二维码
 tests/
 ├── detect.spec.ts
 ├── share.spec.ts
@@ -275,7 +278,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.1.3**：补拦 QQ 群名片（`source=sharecard` 的 contact.lua 卡、OneBot `contact` 段）。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃，扫码失败不再跳过腾讯文档检测。1.1.1 补齐跳过原因日志，并用 `http.file` / OneBot `get_image` 与微信扫码器提高检出率。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
+当前版本 **1.2.0**：内置广告词改到 `ad-keywords.txt` 维护，控制台 `adKeywords` 仍作额外强匹配。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 

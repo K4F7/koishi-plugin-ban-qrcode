@@ -1,29 +1,38 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 export interface AdHit {
   matches: string[]
 }
 
-const VERY_STRONG = [
-  '校园麦芽',
-  '送货到寝',
-  '配送到寝',
-  '送寝',
-  '名额有限',
-  '营业执照',
-  '联系本校的负责人',
-  '联系本校负责人',
-  '整套四五百',
-]
+export interface AdKeywordLists {
+  strong: string[]
+  commerce: string[]
+}
 
-const COMMERCE = [
-  '提前预订',
-  '提前预定',
-  '买被子',
-  '购买链接',
-  '质保四年',
-  '厂家直销',
-  '真空包装',
-  '代发到寝',
-]
+const SECTION = /^\[(strong|commerce)\]$/i
+
+export function parseAdKeywords(source: string): AdKeywordLists {
+  const lists: AdKeywordLists = { strong: [], commerce: [] }
+  let section: keyof AdKeywordLists = 'strong'
+  for (const raw of source.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const marker = line.match(SECTION)
+    if (marker) {
+      section = marker[1].toLowerCase() as keyof AdKeywordLists
+      continue
+    }
+    lists[section].push(line)
+  }
+  return lists
+}
+
+function loadAdKeywords(): AdKeywordLists {
+  return parseAdKeywords(readFileSync(join(__dirname, 'ad-keywords.txt'), 'utf8'))
+}
+
+const { strong: VERY_STRONG, commerce: COMMERCE } = loadAdKeywords()
 
 const PRODUCT = /被子|床品|四件套|六件套|九件套|被芯|床垫/
 const SELL = /购买|预订|预定|下单|代购|团购|包邮|厂家|品牌|优惠|联系.{0,8}负责/
