@@ -9,7 +9,7 @@ export function normalizeShare(payload: string): string {
   let text = payload.trim()
   const wrapped = /^\[(?:CQ:)?json(?:,data=|:data=)/i.exec(text)
   if (wrapped && text.endsWith(']')) text = text.slice(wrapped[0].length, -1)
-  return decodeEntities(text)
+  return decodeEntities(text).replace(/\\\//g, '/')
 }
 
 export function isGroupInviteCard(payload: string): boolean {

@@ -34,6 +34,9 @@ describe('tencent doc urls', () => {
     ].join('\n')), [
       'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
+    assert.deepEqual(collectTencentDocUrls('{"jumpUrl":"https:\\/\\/docs.qq.com\\/doc\\/DWHNhYk1iZVZMY1Rh"}'), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
   })
 })
 

@@ -94,6 +94,7 @@ npm run build
 | `scanGroupInvite` | `boolean` | `true` | 拦截邀请 / 推荐群聊分享卡 |
 | `scanDocs` | `boolean` | `true` | 检查腾讯文档和 Word / 文本附件 |
 | `adKeywords` | `string[]` | `[]` | 额外广告关键词，命中即撤回 |
+| `debug` | `boolean` | `true` | 输出调试日志：跳过原因、消息结构、下载 / 扫码 / 文档结果 |
 
 默认提示按原因变化，例如：`检测到拉群卡片，已撤回并禁言 60 秒。` / `检测到文档广告，已撤回并禁言 60 秒。`
 
@@ -115,7 +116,7 @@ npm run build
 
 ### `decodeQr(buffer)`
 
-用 Jimp 读图、jsQR 解码。没有码时返回 `null`。
+用 Jimp 读图，先 jsQR、再微信扫码器解码。没有码时返回 `null`。
 
 ## Architecture
 
@@ -189,7 +190,9 @@ npm run build
 <details>
 <summary><strong>为什么没有撤回或禁言？</strong></summary>
 
-检查机器人是否有管理员权限，以及适配器是否实现 `deleteMessage` / `muteGuildMember`。权限不足时插件会打日志并继续后续步骤。
+先看 `ban-qrcode` 日志。自测最常见是自己是群主 / 管理员，默认 `skipAdmins` 会直接跳过（日志 `skip admin`）。把该项关掉，或用普通成员号发。
+
+也检查机器人是否有撤回 / 禁言权限。适配器没实现 `deleteMessage` / `muteGuildMember` 时会打 warn。
 </details>
 
 <details>
@@ -201,7 +204,7 @@ npm run build
 <details>
 <summary><strong>为什么有的二维码没扫到？</strong></summary>
 
-图太糊、码只占画面很小一块、或格式 Jimp 读不了（少见 webp）时可能漏检。把更清晰的整图发来更容易命中。
+先看日志是 `qr error`（图没下下来）还是 `qr miss`（下到了但没解出来）。下载走 Koishi 的 `http.file`，OneBot 还会再试 `get_image`。解码先 jsQR，失败再走官方 `qrcode-service` 同款的微信扫码器。图太糊、码只占画面很小一块仍可能漏检。
 </details>
 
 <details>
@@ -272,7 +275,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.1.0**：在 1.0.0 扫码撤回之外，增加拉群分享卡拦截，以及腾讯文档 / Word 中的床品推销等广告识别。
+当前版本 **1.1.1**：补齐跳过原因日志，并用 `http.file` / OneBot `get_image` 与微信扫码器提高二维码、文档链接检出率。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 

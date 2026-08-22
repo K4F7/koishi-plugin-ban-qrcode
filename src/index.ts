@@ -4,13 +4,17 @@ import {
   HitReason,
   collectMessageParts,
   defaultNotify,
+  elementTypes,
   findQrInImages,
   isOfficeFile,
   muteDurationMs,
-  shouldModerate,
+  resolveGuildId,
+  roleLabels,
+  skipModerateReason,
+  summarizeSrc,
 } from './detect'
 import { collectTencentDocUrls, extractOfficeText, fetchTencentDoc } from './document'
-import { downloadImage, decodeQr } from './qrcode'
+import { createFileResolver, decodeQr, downloadImage, warmupQrDecoder } from './qrcode'
 import { isGroupInviteCard } from './share'
 
 export const name = 'ban-qrcode'
@@ -21,6 +25,8 @@ export const usage = `
 群内检测到图片二维码、拉群分享卡，或腾讯文档 / Word 里的卖货广告时，自动撤回并禁言发送者（默认 60 秒）。
 
 机器人需要撤回消息和禁言成员的权限。群主 / 管理员默认跳过。
+
+自测没反应时打开 debug，看日志里是 skip admin、图片没下下来，还是扫码/文档未命中。
 `
 
 export interface Config {
@@ -35,6 +41,7 @@ export interface Config {
   scanGroupInvite: boolean
   scanDocs: boolean
   adKeywords: string[]
+  debug: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -42,22 +49,25 @@ export const Config: Schema<Config> = Schema.object({
   recall: Schema.boolean().default(true).description('撤回违规消息。'),
   notify: Schema.boolean().default(true).description('处理后在群内发送提示。'),
   notifyText: Schema.string().default('').description('自定义提示。留空则按原因和禁言秒数生成。'),
-  skipAdmins: Schema.boolean().default(true).description('跳过群主和管理员。'),
+  skipAdmins: Schema.boolean().default(true).description('跳过群主和管理员。自测请先关掉，或用普通成员号发。'),
   ignoreUsers: Schema.array(Schema.string()).role('table').default([]).description('忽略的用户 ID。'),
   guilds: Schema.array(Schema.string()).role('table').default([]).description('只在这些群生效。留空表示全部群。'),
   scanQrcode: Schema.boolean().default(true).description('扫描图片二维码。'),
   scanGroupInvite: Schema.boolean().default(true).description('拦截邀请 / 推荐群聊分享卡。'),
   scanDocs: Schema.boolean().default(true).description('检查腾讯文档和 Word / 文本附件里的广告。'),
   adKeywords: Schema.array(Schema.string()).role('table').default([]).description('额外广告关键词。命中即撤回。'),
+  debug: Schema.boolean().default(true).description('输出调试日志：跳过原因、消息结构、下载/扫码/文档结果。'),
 })
 
 export function apply(ctx: Context, config: Config) {
   const logger = ctx.logger('ban-qrcode')
   const docHttp = createDocHttp(ctx.http)
+  void warmupQrDecoder().catch(error => logger.warn(error))
 
   ctx.on('message', async (session) => {
-    if (!shouldModerate({
+    const moderate = {
       guildId: session.guildId,
+      channelId: session.channelId,
       isDirect: session.isDirect,
       userId: session.userId,
       selfId: session.selfId,
@@ -65,16 +75,52 @@ export function apply(ctx: Context, config: Config) {
       guilds: config.guilds,
       roles: session.event.member?.roles,
       skipAdmins: config.skipAdmins,
-    })) return
-
+    }
     const parts = collectMessageParts(session.elements ?? [], session.content ?? '')
-    const docUrls = config.scanDocs ? collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')) : []
-    const officeFiles = config.scanDocs ? parts.files.filter(file => isOfficeFile(file.name)) : []
+    const skip = skipModerateReason(moderate)
+    if (skip) {
+      if (config.debug && looksRelevant(parts, config)) {
+        logger.info(
+          'skip %s user=%s guild=%s roles=%j images=%d shares=%d files=%d types=%j',
+          skip,
+          session.userId,
+          resolveGuildId(moderate),
+          roleLabels(moderate.roles),
+          parts.images.length,
+          parts.shares.length,
+          parts.files.length,
+          elementTypes(session.elements ?? []),
+        )
+      }
+      return
+    }
 
+    const docUrls = config.scanDocs
+      ? collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n'))
+      : []
+    const officeFiles = config.scanDocs ? parts.files.filter(file => isOfficeFile(file.name)) : []
     const needInvite = config.scanGroupInvite && parts.shares.some(isGroupInviteCard)
     const needQr = config.scanQrcode && parts.images.length > 0
     const needDocs = Boolean(docUrls.length || officeFiles.length)
+
+    if (config.debug) {
+      logger.info(
+        'seen user=%s guild=%s types=%j images=%d shares=%d files=%d docs=%d invite=%s',
+        session.userId,
+        resolveGuildId(moderate),
+        elementTypes(session.elements ?? []),
+        parts.images.length,
+        parts.shares.length,
+        parts.files.length,
+        docUrls.length + officeFiles.length,
+        needInvite,
+      )
+    }
+
     if (!needInvite && !needQr && !needDocs) return
+
+    const resolveFile = createFileResolver(session.bot)
+    const download = (src: string) => downloadImage(ctx.http, src, resolveFile)
 
     try {
       if (needInvite) {
@@ -85,8 +131,11 @@ export function apply(ctx: Context, config: Config) {
       if (needQr) {
         const hit = await findQrInImages(
           parts.images,
-          src => downloadImage(ctx.http, src),
+          download,
           decodeQr,
+          (src, status) => {
+            if (config.debug) logger.info('qr %s %s', status, summarizeSrc(src))
+          },
         )
         if (hit) {
           await enforce(session, config, logger, 'qrcode')
@@ -94,21 +143,34 @@ export function apply(ctx: Context, config: Config) {
         }
       }
 
-      if (!needDocs) return
+      if (!needDocs) {
+        if (config.debug) logger.info('no-hit user=%s guild=%s', session.userId, resolveGuildId(moderate))
+        return
+      }
 
       for (const url of docUrls) {
         try {
           const doc = await fetchTencentDoc(docHttp, url)
-          if (!doc) continue
-          if (detectAdContent(doc.text, doc.title, config.adKeywords)) {
+          if (!doc) {
+            if (config.debug) logger.info('doc empty %s', url)
+            continue
+          }
+          const ad = detectAdContent(doc.text, doc.title, config.adKeywords)
+          if (config.debug) {
+            logger.info('doc %s title=%s ad=%s images=%d', url, doc.title || '-', Boolean(ad), doc.images.length)
+          }
+          if (ad) {
             await enforce(session, config, logger, 'ad-doc')
             return
           }
           if (config.scanQrcode && doc.images.length) {
             const qr = await findQrInImages(
               doc.images,
-              src => downloadImage(ctx.http, src),
+              download,
               decodeQr,
+              (src, status) => {
+                if (config.debug) logger.info('doc-qr %s %s', status, summarizeSrc(src))
+              },
             )
             if (qr) {
               await enforce(session, config, logger, 'qrcode')
@@ -122,8 +184,10 @@ export function apply(ctx: Context, config: Config) {
 
       for (const file of officeFiles) {
         try {
-          const doc = extractOfficeText(await downloadImage(ctx.http, file.src), file.name)
-          if (doc && detectAdContent(doc.text, doc.title || file.name, config.adKeywords)) {
+          const doc = extractOfficeText(await download(file.src), file.name)
+          const ad = doc ? detectAdContent(doc.text, doc.title || file.name, config.adKeywords) : null
+          if (config.debug) logger.info('office %s ad=%s', file.name, Boolean(ad))
+          if (doc && ad) {
             await enforce(session, config, logger, 'ad-doc')
             return
           }
@@ -131,6 +195,8 @@ export function apply(ctx: Context, config: Config) {
           logger.warn(error)
         }
       }
+
+      if (config.debug) logger.info('no-hit user=%s guild=%s', session.userId, resolveGuildId(moderate))
     } catch (error) {
       logger.warn(error)
     }
@@ -142,6 +208,7 @@ interface EnforceSession {
   guildId?: string
   messageId?: string
   channelId?: string
+  isDirect?: boolean
   bot: {
     deleteMessage(channelId: string, messageId: string): Promise<unknown>
     muteGuildMember(guildId: string, userId: string, duration: number): Promise<unknown>
@@ -155,28 +222,47 @@ async function enforce(
   logger: { info: (...args: unknown[]) => void, warn: (error: unknown) => void },
   reason: HitReason,
 ) {
-  logger.info('%s from %s in %s', reason, session.userId, session.guildId)
+  const guildId = resolveGuildId(session)
+  logger.info('%s from %s in %s', reason, session.userId, guildId)
 
   if (config.recall && session.messageId && session.channelId) {
     try {
       await session.bot.deleteMessage(session.channelId, session.messageId)
+      if (config.debug) logger.info('recall ok %s', session.messageId)
     } catch (error) {
       logger.warn(error)
     }
+  } else if (config.debug && config.recall) {
+    logger.info('recall skipped messageId=%s channelId=%s', session.messageId, session.channelId)
   }
 
   const duration = muteDurationMs(config.muteSeconds)
-  if (duration > 0 && session.guildId && session.userId) {
+  if (duration > 0 && guildId && session.userId) {
     try {
-      await session.bot.muteGuildMember(session.guildId, session.userId, duration)
+      await session.bot.muteGuildMember(guildId, session.userId, duration)
+      if (config.debug) logger.info('mute ok %s %sms', session.userId, duration)
     } catch (error) {
       logger.warn(error)
     }
+  } else if (config.debug && duration > 0) {
+    logger.info('mute skipped guild=%s user=%s', guildId, session.userId)
   }
 
   if (config.notify) {
     await session.send(config.notifyText || defaultNotify(config.muteSeconds, reason))
   }
+}
+
+function looksRelevant(
+  parts: { images: string[], shares: string[], files: { name: string }[], urls: string[], text: string },
+  config: Config,
+) {
+  if (config.scanQrcode && parts.images.length) return true
+  if (config.scanGroupInvite && parts.shares.length) return true
+  if (config.scanDocs && (parts.files.some(file => isOfficeFile(file.name)) || collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')).length)) {
+    return true
+  }
+  return false
 }
 
 function createDocHttp(http: HTTP) {

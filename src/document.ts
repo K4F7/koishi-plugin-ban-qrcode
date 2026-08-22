@@ -1,5 +1,5 @@
 import { inflateRawSync } from 'node:zlib'
-import { collectUrls } from './detect'
+import { collectUrls, unescapePayload } from './detect'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 const DOC_RE = /https?:\/\/(?:docs\.qq\.com|doc\.weixin\.qq\.com)\/(doc|sheet|slide|pdf|form|mind)\/([A-Za-z0-9]+)/i
@@ -30,7 +30,7 @@ export function collectTencentDocUrls(text: string): string[] {
   const urls: string[] = []
   const seen = new Set<string>()
   const re = new RegExp(DOC_RE.source, 'gi')
-  for (const match of text.matchAll(re)) {
+  for (const match of unescapePayload(text).matchAll(re)) {
     const parsed = parseTencentDocUrl(match[0])
     if (!parsed || seen.has(parsed.pageUrl)) continue
     seen.add(parsed.pageUrl)

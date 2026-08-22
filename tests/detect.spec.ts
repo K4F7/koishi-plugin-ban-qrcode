@@ -3,12 +3,15 @@ import { describe, it } from 'node:test'
 import QRCode from 'qrcode'
 import {
   collectImageSrcs,
+  collectMessageParts,
+  collectUrls,
   defaultNotify,
   findQrInImages,
   isAdminRole,
   muteDurationMs,
   parseDataUrl,
   shouldModerate,
+  skipModerateReason,
 } from '../src/detect'
 import { decodeQr } from '../src/qrcode'
 
@@ -56,6 +59,13 @@ describe('shouldModerate', () => {
     assert.equal(shouldModerate({ ...base, userId: 'bot' }), false)
     assert.equal(shouldModerate({ ...base, ignoreUsers: ['u1'] }), false)
     assert.equal(shouldModerate({ ...base, guilds: ['g2'] }), false)
+    assert.equal(skipModerateReason({ ...base, roles: ['admin'] }), 'admin')
+    assert.equal(skipModerateReason({ ...base, isDirect: true }), 'direct')
+  })
+
+  it('falls back to channelId when guildId is missing', () => {
+    assert.equal(shouldModerate({ ...base, guildId: undefined, channelId: 'g1' }), true)
+    assert.equal(shouldModerate({ ...base, guildId: undefined, channelId: 'private:u1' }), false)
   })
 
   it('skips admin roles when configured', () => {
@@ -66,6 +76,30 @@ describe('shouldModerate', () => {
     assert.equal(isAdminRole(['owner']), true)
     assert.equal(isAdminRole([{ id: 'r1', name: 'owner' }]), true)
     assert.equal(isAdminRole([{ id: 'admin' }]), true)
+  })
+})
+
+describe('collectUrls and share payloads', () => {
+  it('unescapes qq json slashes and reads object share data', () => {
+    assert.deepEqual(collectUrls('https:\\/\\/docs.qq.com\\/doc\\/DWHNhYk1iZVZMY1Rh'), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+
+    const parts = collectMessageParts([
+      {
+        type: 'json',
+        attrs: {
+          data: {
+            app: 'com.tencent.structmsg',
+            meta: { news: { jumpUrl: 'https:\\/\\/docs.qq.com\\/doc\\/DWHNhYk1iZVZMY1Rh' } },
+          },
+        },
+      },
+      { type: 'onebot:json', attrs: { data: '{"app":"com.tencent.qun.invite"}' } },
+    ])
+    assert.ok(parts.urls.includes('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'))
+    assert.ok(parts.shares.some(item => item.includes('com.tencent.qun.invite')))
+    assert.ok(parts.shares.some(item => item.includes('com.tencent.structmsg')))
   })
 })
 
