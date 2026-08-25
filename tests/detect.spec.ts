@@ -14,6 +14,7 @@ import {
   skipModerateReason,
 } from '../src/detect'
 import { collectTencentDocUrls } from '../src/document'
+import { TENCENT_DOC_WECHAT_APPID } from '../src/share'
 import { decodeQr } from '../src/qrcode'
 
 describe('collectImageSrcs', () => {
@@ -150,7 +151,7 @@ describe('collectUrls and share payloads', () => {
       prompt: '[QQ小程序]腾讯文档',
       meta: {
         detail_1: {
-          appid: 'wxd45c635d754dbf59',
+          appid: TENCENT_DOC_WECHAT_APPID,
           qqdocurl: 'https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc',
         },
       },

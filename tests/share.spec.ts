@@ -3,7 +3,13 @@ import { describe, it } from 'node:test'
 import { detectAdContent } from '../src/ad'
 import { collectMessageParts } from '../src/detect'
 import { collectTencentDocUrls, extractTencentDocUrlsFromShare } from '../src/document'
-import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from '../src/share'
+import {
+  extractShareCardText,
+  isGroupInviteCard,
+  isTencentDocCard,
+  TENCENT_DOC_QQ_APPID,
+  TENCENT_DOC_WECHAT_APPID,
+} from '../src/share'
 
 const groupCard = JSON.stringify({
   app: 'com.tencent.contact.lua',
@@ -67,11 +73,11 @@ const miniDocCard = JSON.stringify({
   prompt: '[QQ小程序]腾讯文档',
   meta: {
     detail_1: {
-      appid: 'wxd45c635d754dbf59',
+      appid: TENCENT_DOC_WECHAT_APPID,
       title: '大一新生必备清单',
       desc: '腾讯文档',
       appname: '腾讯文档',
-      url: 'mqqapi://miniapp/open?_miniappid=1108338344&_path=' + encodeURIComponent(
+      url: 'mqqapi://miniapp/open?_miniappid=' + TENCENT_DOC_QQ_APPID + '&_path=' + encodeURIComponent(
         'pages/detail/detail?url=' + encodeURIComponent('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'),
       ),
       qqdocurl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
@@ -84,7 +90,7 @@ const weixinMiniDocCard = JSON.stringify({
   prompt: '[QQ小程序]',
   meta: {
     detail_1: {
-      appid: '1108338344',
+      appid: TENCENT_DOC_QQ_APPID,
       title: '入学清单',
       url: 'mqqapi://miniapp/open?_path=' + encodeURIComponent(
         'pages/detail/detail?url=' + encodeURIComponent('https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc'),
@@ -136,7 +142,7 @@ const weixinDocXml = [
   '<sourcedisplayname>腾讯文档</sourcedisplayname>',
   '<url>https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#</url>',
   '<weappinfo>',
-  '<appid>wxd45c635d754dbf59</appid>',
+  `<appid>${TENCENT_DOC_WECHAT_APPID}</appid>`,
   '<pagepath>pages/detail/detail.html?url=https%3A%2F%2Fdocs.qq.com%2Fdoc%2FDWHNhYk1iZVZMY1Rh%23</pagepath>',
   '</weappinfo>',
   '</appmsg></msg>',
