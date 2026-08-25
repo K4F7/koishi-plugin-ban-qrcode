@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { detectAdContent } from '../src/ad'
 import { collectMessageParts } from '../src/detect'
+import { collectTencentDocUrls } from '../src/document'
 import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from '../src/share'
 
 const groupCard = JSON.stringify({
@@ -61,6 +62,37 @@ const docCard = JSON.stringify({
   },
 })
 
+const miniDocCard = JSON.stringify({
+  app: 'com.tencent.miniapp_01',
+  prompt: '[QQ小程序]腾讯文档',
+  meta: {
+    detail_1: {
+      appid: 'wxd45c635d754dbf59',
+      title: '大一新生必备清单',
+      desc: '腾讯文档',
+      appname: '腾讯文档',
+      url: 'mqqapi://miniapp/open?_miniappid=1108338344&_path=' + encodeURIComponent(
+        'pages/detail/detail?url=' + encodeURIComponent('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'),
+      ),
+      qqdocurl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    },
+  },
+})
+
+const weixinMiniDocCard = JSON.stringify({
+  app: 'com.tencent.miniapp_01',
+  prompt: '[QQ小程序]',
+  meta: {
+    detail_1: {
+      appid: '1108338344',
+      title: '入学清单',
+      url: 'mqqapi://miniapp/open?_path=' + encodeURIComponent(
+        'pages/detail/detail?url=' + encodeURIComponent('https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc'),
+      ),
+    },
+  },
+})
+
 describe('isGroupInviteCard', () => {
   it('detects invite apps, group business cards, and xml briefs', () => {
     assert.equal(isGroupInviteCard(inviteApp), true)
@@ -96,6 +128,21 @@ describe('tencent doc share cards', () => {
     assert.equal(detectAdContent(text, ''), null)
   })
 
+  it('treats weixin / QQ mini-program cards as tencent docs and reads the hidden url', () => {
+    assert.equal(isTencentDocCard(miniDocCard), true)
+    assert.equal(isTencentDocCard(weixinMiniDocCard), true)
+    assert.equal(isGroupInviteCard(miniDocCard), false)
+    const text = extractShareCardText(miniDocCard)
+    assert.match(text, /腾讯文档/)
+    assert.match(text, /大一新生必备清单/)
+    assert.deepEqual(collectTencentDocUrls(miniDocCard), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+    assert.deepEqual(collectTencentDocUrls(weixinMiniDocCard), [
+      'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    ])
+  })
+
   it('flags a share card when desc already contains ad keywords', () => {
     const adCard = JSON.stringify({
       app: 'com.tencent.structmsg',
@@ -120,6 +167,7 @@ describe('collectMessageParts', () => {
   it('collects share payloads, office files, and urls from nodes and raw content', () => {
     const parts = collectMessageParts([
       { type: 'text', attrs: { content: '看这个 https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh' } },
+      { type: 'lightapp', attrs: { data: miniDocCard } },
       { type: 'json', attrs: { data: groupCard } },
       { type: 'contact', attrs: { type: 'group', id: '123456' } },
       { type: 'file', attrs: { src: 'https://a.test/list.docx', filename: '大一新生必备清单.docx' } },
@@ -130,6 +178,7 @@ describe('collectMessageParts', () => {
     assert.deepEqual(parts.files, [{ src: 'https://a.test/list.docx', name: '大一新生必备清单.docx' }])
     assert.ok(parts.shares.includes(groupCard))
     assert.ok(parts.shares.includes(inviteApp))
+    assert.ok(parts.shares.includes(miniDocCard))
     assert.ok(parts.shares.some(item => item.includes('"type":"group"') && item.includes('123456')))
     assert.ok(parts.urls.includes('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'))
   })

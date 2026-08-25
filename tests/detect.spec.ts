@@ -13,6 +13,7 @@ import {
   shouldModerate,
   skipModerateReason,
 } from '../src/detect'
+import { collectTencentDocUrls } from '../src/document'
 import { decodeQr } from '../src/qrcode'
 
 describe('collectImageSrcs', () => {
@@ -141,6 +142,28 @@ describe('collectUrls and share payloads', () => {
     assert.ok(parts.urls.includes('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'))
     assert.ok(parts.shares.some(item => item.includes('com.tencent.qun.invite')))
     assert.ok(parts.shares.some(item => item.includes('com.tencent.structmsg')))
+  })
+
+  it('collects weixin mini-program tencent-doc cards from lightapp nodes', () => {
+    const card = JSON.stringify({
+      app: 'com.tencent.miniapp_01',
+      prompt: '[QQ小程序]腾讯文档',
+      meta: {
+        detail_1: {
+          appid: 'wxd45c635d754dbf59',
+          qqdocurl: 'https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+        },
+      },
+    })
+    const parts = collectMessageParts([
+      { type: 'lightapp', attrs: { data: card } },
+      { type: 'onebot:miniapp', attrs: { data: card } },
+    ])
+    assert.ok(parts.shares.includes(card))
+    assert.ok(parts.urls.includes('https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc'))
+    assert.deepEqual(collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')), [
+      'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    ])
   })
 })
 

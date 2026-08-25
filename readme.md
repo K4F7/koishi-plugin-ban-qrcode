@@ -74,7 +74,7 @@ npm run build
 1. 只处理群聊，忽略私聊和机器人自己的消息
 2. 图片二维码：收集 `img` / `image`，下载后解码
 3. 拉群卡片：识别 `json` / `xml` / `contact` 分享卡（`com.tencent.qun.invite`、群名片、`[推荐群]` 等）
-4. 文档广告：从文本、分享卡里取出 `docs.qq.com` 链接，或下载 `.doc` / `.docx` / `.txt`，识别夹带的推销文案（例如校园床品「送货到寝」）
+4. 文档广告：从文本、新闻卡、微信 / QQ 小程序腾讯文档卡里取出 `docs.qq.com` / `doc.weixin.qq.com` 链接（含编码过的小程序 path、`qqdocurl`），或下载 `.doc` / `.docx` / `.txt`，识别夹带的推销文案（例如校园床品「送货到寝」）
 5. 文档里的图也会再扫一遍二维码
 
 不会把解码出的文本或广告原文发回群里。纯物品清单（只写「被子、枕头」而没有推销）不会误杀。
@@ -279,7 +279,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.2.1**：Word / 文本附件默认限制 5MB（`maxOfficeMb`），防止解压占用过多内存。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
+当前版本 **1.2.1**：Word / 文本附件默认限制 5MB（`maxOfficeMb`），防止解压占用过多内存。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。微信 / QQ 小程序腾讯文档卡会解析 `qqdocurl` 和编码 path，再按同一套正文接口分析。
 
 ## License
 

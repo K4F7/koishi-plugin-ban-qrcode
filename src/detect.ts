@@ -73,9 +73,13 @@ const SHARE_TYPES = new Set([
   'share',
   'ark',
   'lightapp',
+  'miniapp',
   'onebot:json',
   'onebot:xml',
   'onebot:share',
+  'onebot:ark',
+  'onebot:lightapp',
+  'onebot:miniapp',
 ])
 const CONTACT_TYPES = new Set([
   'contact',

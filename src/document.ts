@@ -2,7 +2,10 @@ import { inflateRawSync } from 'node:zlib'
 import { collectUrls, unescapePayload } from './detect'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-const DOC_RE = /https?:\/\/(?:docs\.qq\.com|doc\.weixin\.qq\.com)\/(doc|sheet|slide|pdf|form|mind)\/([A-Za-z0-9]+)/i
+const DOC_HOST = '(?:docs\\.qq\\.com|doc\\.weixin\\.qq\\.com)'
+const DOC_KIND = 'doc|sheet|slide|pdf|form|mind|smartsheet|smartpage'
+const DOC_ID = '[A-Za-z0-9][A-Za-z0-9_-]{5,}'
+const DOC_RE = new RegExp(`https?:\\/\\/${DOC_HOST}\\/(${DOC_KIND})(?:\\/page)?\\/(${DOC_ID})`, 'i')
 const ZIP_LOCAL = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const IMAGE_RE = /https?:\/\/docimg\d+\.docs\.qq\.com\/image\/[A-Za-z0-9_-]+(?:\.(?:jpe?g|png|webp))?/gi
 export const DEFAULT_MAX_OFFICE_BYTES = 5 * 1024 * 1024
@@ -18,20 +21,24 @@ export interface DocHttp {
 }
 
 export function parseTencentDocUrl(url: string): { kind: string, id: string, pageUrl: string } | null {
-  const match = DOC_RE.exec(url)
+  const match = DOC_RE.exec(decodePercents(unescapePayload(url)))
   if (!match) return null
+  const kind = match[1].toLowerCase()
+  const id = match[2]
+  const path = kind === 'form' ? `form/page/${id}` : `${kind}/${id}`
   return {
-    kind: match[1],
-    id: match[2],
-    pageUrl: `https://docs.qq.com/${match[1]}/${match[2]}`,
+    kind,
+    id,
+    pageUrl: `https://docs.qq.com/${path}`,
   }
 }
 
 export function collectTencentDocUrls(text: string): string[] {
   const urls: string[] = []
   const seen = new Set<string>()
+  const decoded = decodePercents(unescapePayload(text))
   const re = new RegExp(DOC_RE.source, 'gi')
-  for (const match of unescapePayload(text).matchAll(re)) {
+  for (const match of decoded.matchAll(re)) {
     const parsed = parseTencentDocUrl(match[0])
     if (!parsed || seen.has(parsed.pageUrl)) continue
     seen.add(parsed.pageUrl)
@@ -78,14 +85,35 @@ export async function fetchTencentDoc(http: DocHttp, url: string): Promise<DocCo
   const parsed = parseTencentDocUrl(url)
   if (!parsed) return null
 
-  const page = await http.text(parsed.pageUrl, {
+  const pageUrls = [parsed.pageUrl]
+  if (/doc\.weixin\.qq\.com/i.test(url) || parsed.id.includes('_')) {
+    const weixinPath = parsed.kind === 'form' ? `form/page/${parsed.id}` : `${parsed.kind}/${parsed.id}`
+    const weixinUrl = `https://doc.weixin.qq.com/${weixinPath}`
+    if (!pageUrls.includes(weixinUrl)) pageUrls.push(weixinUrl)
+  }
+
+  let lastError: unknown
+  for (const pageUrl of pageUrls) {
+    try {
+      const doc = await fetchOpendocFromPage(http, parsed.id, pageUrl)
+      if (doc) return doc
+    } catch (error) {
+      lastError = error
+    }
+  }
+  if (lastError) throw lastError
+  return null
+}
+
+async function fetchOpendocFromPage(http: DocHttp, id: string, pageUrl: string): Promise<DocContent | null> {
+  const page = await http.text(pageUrl, {
     'user-agent': UA,
     accept: 'text/html',
   })
-  const opendocUrl = extractOpendocUrl(page.body, parsed.id) ?? defaultOpendocUrl(parsed.id)
+  const opendocUrl = extractOpendocUrl(page.body, id) ?? defaultOpendocUrl(id)
   const headers: Record<string, string> = {
     'user-agent': UA,
-    referer: parsed.pageUrl,
+    referer: pageUrl,
     accept: '*/*',
   }
   if (page.cookies) headers.cookie = page.cookies
@@ -131,7 +159,7 @@ function defaultOpendocUrl(id: string): string {
 }
 
 function extractOpendocUrl(html: string, id: string): string | undefined {
-  const match = html.match(/\/\/docs\.qq\.com\/dop-api\/opendoc\?[^"'<\s]+/)
+  const match = html.match(/\/\/(?:docs\.qq\.com|doc\.weixin\.qq\.com)\/dop-api\/opendoc\?[^"'<\s]+/)
   if (!match) return undefined
   const url = `https:${match[0]}`
   return url.includes(id) ? url : undefined
@@ -212,6 +240,21 @@ function readZipEntry(buffer: Buffer, suffix: string, maxBytes: number): string 
     offset = dataStart + Math.max(compSize, 1)
   }
   return null
+}
+
+function decodePercents(text: string, times = 3): string {
+  let current = text
+  for (let i = 0; i < times; i++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(current)) break
+    try {
+      const next = decodeURIComponent(current)
+      if (next === current) break
+      current = next
+    } catch {
+      break
+    }
+  }
+  return current
 }
 
 function firstString(...values: unknown[]): string {
