@@ -279,7 +279,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.3.1**：腾讯文档微信小程序 AppID 改为运行时拼接，避免 GitHub secret scanning 把公开标识当成密钥。1.3.0：识别微信 / QQ 小程序腾讯文档卡，还原 `docs.qq.com` 链接后再按原逻辑拉正文。1.2.1：Word / 文本附件默认限制 5MB（`maxOfficeMb`）。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
+当前版本 **1.3.2**：微信小程序「新生清单」腾讯文档卡即使没有 `docs.qq.com` 链接也会撤回。1.3.1：腾讯文档微信小程序 AppID 改为运行时拼接，避免 GitHub secret scanning 把公开标识当成密钥。1.3.0：识别微信 / QQ 小程序腾讯文档卡，还原 `docs.qq.com` 链接后再按原逻辑拉正文。1.2.1：Word / 文本附件默认限制 5MB（`maxOfficeMb`）。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 
