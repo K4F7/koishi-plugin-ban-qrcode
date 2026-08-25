@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { detectAdContent } from '../src/ad'
 import { collectMessageParts } from '../src/detect'
-import { collectTencentDocUrls } from '../src/document'
+import { collectTencentDocUrls, extractTencentDocUrlsFromShare } from '../src/document'
 import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from '../src/share'
 
 const groupCard = JSON.stringify({
@@ -93,6 +93,55 @@ const weixinMiniDocCard = JSON.stringify({
   },
 })
 
+const weixinLuaDocCard = {
+  app: 'com.tencent.miniapp.lua',
+  view: 'miniapp',
+  bizsrc: 'miniapp.nativeshare',
+  prompt: '[微信小程序]大一新生必备清单(详细版)(2) (1)',
+  meta: {
+    miniapp: {
+      tag: '微信小程序',
+      title: '大一新生必备清单(详细版)(2) (1)',
+      source: '腾讯文档',
+      jumpUrl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#',
+      pcJumpUrl: 'miniapp://open/1036?url=' + encodeURIComponent(
+        'pages/detail/detail?url=' + encodeURIComponent('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'),
+      ),
+    },
+  },
+}
+
+const weixinLuaEncodedOnly = {
+  app: 'com.tencent.miniapp.lua',
+  view: 'miniapp',
+  prompt: '[微信小程序]大一新生必备清单(详细版)(2) (1)',
+  meta: {
+    miniapp: {
+      tag: '微信小程序',
+      source: '腾讯文档',
+      title: '大一新生必备清单(详细版)(2) (1)',
+      jumpUrl: 'https://m.q.qq.com/a/s/deadbeef',
+      pcJumpUrl: 'miniapp://open/1036?url=' + encodeURIComponent(
+        'pages/detail/detail.html?url=' + encodeURIComponent('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'),
+      ),
+    },
+  },
+}
+
+const weixinDocXml = [
+  '<?xml version="1.0"?>',
+  '<msg><appmsg>',
+  '<title>大一新生必备清单(详细版)(2) (1)</title>',
+  '<type>33</type>',
+  '<sourcedisplayname>腾讯文档</sourcedisplayname>',
+  '<url>https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#</url>',
+  '<weappinfo>',
+  '<appid>wxd45c635d754dbf59</appid>',
+  '<pagepath>pages/detail/detail.html?url=https%3A%2F%2Fdocs.qq.com%2Fdoc%2FDWHNhYk1iZVZMY1Rh%23</pagepath>',
+  '</weappinfo>',
+  '</appmsg></msg>',
+].join('')
+
 describe('isGroupInviteCard', () => {
   it('detects invite apps, group business cards, and xml briefs', () => {
     assert.equal(isGroupInviteCard(inviteApp), true)
@@ -140,6 +189,32 @@ describe('tencent doc share cards', () => {
     ])
     assert.deepEqual(collectTencentDocUrls(weixinMiniDocCard), [
       'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    ])
+  })
+
+  it('parses the weixin miniapp.lua 腾讯文档 card back to docs.qq.com', () => {
+    const payload = JSON.stringify(weixinLuaDocCard)
+    assert.equal(isTencentDocCard(payload), true)
+    assert.deepEqual(extractTencentDocUrlsFromShare(payload), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+    assert.deepEqual(extractTencentDocUrlsFromShare(JSON.stringify(weixinLuaEncodedOnly)), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+    assert.deepEqual(extractTencentDocUrlsFromShare(weixinDocXml), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+  })
+
+  it('collects a flattened weixin mini-program card even when attrs has no data wrapper', () => {
+    const parts = collectMessageParts([
+      { type: 'json', attrs: weixinLuaDocCard },
+      { type: 'xml', attrs: { data: weixinDocXml } },
+    ])
+    assert.ok(parts.shares.some(item => item.includes('com.tencent.miniapp.lua')))
+    assert.ok(parts.urls.includes('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'))
+    assert.deepEqual(extractTencentDocUrlsFromShare(parts.shares.find(item => item.includes('miniapp.lua')) ?? ''), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
   })
 

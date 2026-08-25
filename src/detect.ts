@@ -80,6 +80,10 @@ const SHARE_TYPES = new Set([
   'onebot:ark',
   'onebot:lightapp',
   'onebot:miniapp',
+  'weapp',
+  'wxapp',
+  'miniprogram',
+  'onebot:weapp',
 ])
 const CONTACT_TYPES = new Set([
   'contact',
@@ -127,8 +131,8 @@ export function collectMessageParts(nodes: readonly ImageNode[], extra = ''): Me
         const content = node.attrs?.content ?? node.attrs?.text
         if (typeof content === 'string' && content) texts.push(content)
       }
-      if (SHARE_TYPES.has(node.type)) {
-        addShare(unwrapShareData(node.attrs?.data ?? node.attrs?.content ?? node.attrs?.value))
+      if (SHARE_TYPES.has(node.type) || looksLikeShareAttrs(node.attrs)) {
+        addShare(sharePayloadFromAttrs(node.attrs))
       }
       if (CONTACT_TYPES.has(node.type)) {
         addShare(node.attrs)
@@ -224,6 +228,28 @@ function unwrapShareData(raw: unknown): unknown {
     return unescapePayload(record.data.trim())
   }
   return raw
+}
+
+function looksLikeShareAttrs(attrs?: Record<string, unknown>): boolean {
+  if (!attrs) return false
+  if (typeof attrs.app === 'string') return true
+  if (attrs.meta && (attrs.prompt || attrs.view || attrs.bizsrc)) return true
+  const wrapped = attrs.data ?? attrs.content ?? attrs.value
+  if (typeof wrapped === 'string' && /"app"\s*:/.test(wrapped)) return true
+  if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) {
+    return typeof (wrapped as Record<string, unknown>).app === 'string'
+  }
+  return false
+}
+
+function sharePayloadFromAttrs(attrs?: Record<string, unknown>): unknown {
+  if (!attrs) return undefined
+  const wrapped = attrs.data ?? attrs.content ?? attrs.value
+  if (wrapped !== undefined && wrapped !== null && wrapped !== '') {
+    return unwrapShareData(wrapped)
+  }
+  if (typeof attrs.app === 'string' || attrs.meta) return attrs
+  return undefined
 }
 
 export function isDownloadableSrc(src: string): boolean {

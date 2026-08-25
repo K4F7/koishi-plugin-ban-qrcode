@@ -5,6 +5,7 @@ import {
   DEFAULT_MAX_OFFICE_BYTES,
   collectTencentDocUrls,
   extractOfficeText,
+  extractTencentDocUrlsFromShare,
   fetchTencentDoc,
   parseOpendocBody,
   parseTencentDocUrl,
@@ -71,6 +72,14 @@ describe('tencent doc urls', () => {
       ),
     ), [
       'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    ])
+    assert.deepEqual(parseTencentDocUrl('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'), {
+      kind: 'doc',
+      id: 'DWHNhYk1iZVZMY1Rh',
+      pageUrl: 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    })
+    assert.deepEqual(extractTencentDocUrlsFromShare('jumpUrl=docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
   })
 })
