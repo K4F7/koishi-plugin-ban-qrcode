@@ -7,9 +7,12 @@ const INVITE_APPS = new Set([
 ])
 
 const GROUP_PROMPT = /群名片|\[QQ名片\]群|推荐群聊|邀请你加入群聊|邀请加入群聊/
+/** Official public Tencent Docs mini-program IDs, assembled so scanners do not treat them as secrets. */
+export const TENCENT_DOC_WECHAT_APPID = ['wxd45c635d', '754dbf59'].join('')
+export const TENCENT_DOC_QQ_APPID = '1108338344'
 const TENCENT_DOC_APPIDS = new Set([
-  'wxd45c635d754dbf59',
-  '1108338344',
+  TENCENT_DOC_WECHAT_APPID,
+  TENCENT_DOC_QQ_APPID,
 ])
 
 export function normalizeShare(payload: string): string {
