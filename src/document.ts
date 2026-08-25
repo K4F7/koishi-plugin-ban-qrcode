@@ -5,7 +5,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const DOC_HOST = '(?:docs\\.qq\\.com|doc\\.weixin\\.qq\\.com)'
 const DOC_KIND = 'doc|sheet|slide|pdf|form|mind|smartsheet|smartpage'
 const DOC_ID = '[A-Za-z0-9][A-Za-z0-9_-]{5,}'
-const DOC_RE = new RegExp(`https?:\\/\\/${DOC_HOST}\\/(${DOC_KIND})(?:\\/page)?\\/(${DOC_ID})`, 'i')
+const DOC_RE = new RegExp(`(?:https?:\\/\\/)?(?:\\/\\/)?${DOC_HOST}\\/(${DOC_KIND})(?:\\/page)?\\/(${DOC_ID})`, 'i')
 const ZIP_LOCAL = Buffer.from([0x50, 0x4b, 0x03, 0x04])
 const IMAGE_RE = /https?:\/\/docimg\d+\.docs\.qq\.com\/image\/[A-Za-z0-9_-]+(?:\.(?:jpe?g|png|webp))?/gi
 export const DEFAULT_MAX_OFFICE_BYTES = 5 * 1024 * 1024
@@ -36,15 +36,55 @@ export function parseTencentDocUrl(url: string): { kind: string, id: string, pag
 export function collectTencentDocUrls(text: string): string[] {
   const urls: string[] = []
   const seen = new Set<string>()
-  const decoded = decodePercents(unescapePayload(text))
-  const re = new RegExp(DOC_RE.source, 'gi')
-  for (const match of decoded.matchAll(re)) {
-    const parsed = parseTencentDocUrl(match[0])
-    if (!parsed || seen.has(parsed.pageUrl)) continue
-    seen.add(parsed.pageUrl)
-    urls.push(parsed.pageUrl)
+  const add = (value: string) => {
+    const decoded = decodePercents(unescapePayload(value))
+    const re = new RegExp(DOC_RE.source, 'gi')
+    for (const match of decoded.matchAll(re)) {
+      const parsed = parseTencentDocUrl(match[0])
+      if (!parsed || seen.has(parsed.pageUrl)) continue
+      seen.add(parsed.pageUrl)
+      urls.push(parsed.pageUrl)
+    }
+  }
+  add(text)
+  return urls
+}
+
+export function extractTencentDocUrlsFromShare(payload: string): string[] {
+  const urls = collectTencentDocUrls(payload)
+  const seen = new Set(urls)
+  const add = (value: string) => {
+    for (const url of collectTencentDocUrls(value)) {
+      if (seen.has(url)) continue
+      seen.add(url)
+      urls.push(url)
+    }
+  }
+
+  const raw = unescapePayload(payload)
+  try {
+    walkDocCandidates(JSON.parse(decodePercents(raw)), add)
+  } catch {
+    // not json; still scan xml tags below
+  }
+  for (const match of raw.matchAll(/<(?:url|qqdocurl|pagepath|jumpurl|pcjumpurl)[^>]*>([\s\S]*?)<\//gi)) {
+    add(match[1])
   }
   return urls
+}
+
+function walkDocCandidates(value: unknown, add: (value: string) => void) {
+  if (typeof value === 'string') {
+    add(value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) walkDocCandidates(item, add)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) walkDocCandidates(item, add)
+  }
 }
 
 export function parseOpendocBody(body: string): DocContent | null {

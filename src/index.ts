@@ -13,7 +13,7 @@ import {
   skipModerateReason,
   summarizeSrc,
 } from './detect'
-import { collectTencentDocUrls, extractOfficeText, fetchTencentDoc } from './document'
+import { collectTencentDocUrls, extractOfficeText, extractTencentDocUrlsFromShare, fetchTencentDoc } from './document'
 import { createFileResolver, decodeQr, downloadFile, downloadImage, warmupQrDecoder } from './qrcode'
 import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from './share'
 
@@ -98,7 +98,10 @@ export function apply(ctx: Context, config: Config) {
     }
 
     const docUrls = config.scanDocs
-      ? collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n'))
+      ? uniqueStrings([
+        ...collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')),
+        ...parts.shares.flatMap(extractTencentDocUrlsFromShare),
+      ])
       : []
     const officeFiles = config.scanDocs
       ? parts.files.filter(file => isOfficeFile(file.name) || isOfficeFile(file.src))
@@ -290,6 +293,7 @@ function looksRelevant(
   if (config.scanDocs && (
     parts.files.some(file => isOfficeFile(file.name))
     || collectTencentDocUrls([parts.text, ...parts.shares, ...parts.urls].join('\n')).length
+    || parts.shares.some(share => extractTencentDocUrlsFromShare(share).length > 0)
     || parts.shares.some(isTencentDocCard)
   )) {
     return true
@@ -315,6 +319,17 @@ function createDocHttp(http: HTTP) {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'unknown'
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
+  }
+  return result
 }
 
 function cookiesFromHeaders(headers: Headers): string | undefined {
