@@ -3,10 +3,12 @@ import { deflateRawSync } from 'node:zlib'
 import { describe, it } from 'node:test'
 import {
   DEFAULT_MAX_OFFICE_BYTES,
+  collectShareJumpUrls,
   collectTencentDocUrls,
   extractOfficeText,
   extractTencentDocUrlsFromShare,
   fetchTencentDoc,
+  resolveTencentDocUrlsFromJumps,
   parseOpendocBody,
   parseTencentDocUrl,
 } from '../src/document'
@@ -81,6 +83,37 @@ describe('tencent doc urls', () => {
     assert.deepEqual(extractTencentDocUrlsFromShare('jumpUrl=docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#'), [
       'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
+    assert.deepEqual(extractTencentDocUrlsFromShare(
+      `[CQ:json,data={"meta":{"miniapp":{"jumpUrl":"https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#"}}}]`,
+    ), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+  })
+})
+
+describe('share jump urls', () => {
+  it('keeps resolvable http jumps and ignores m.q.qq.com short links', () => {
+    assert.deepEqual(collectShareJumpUrls(JSON.stringify({
+      meta: {
+        miniapp: {
+          jumpUrl: 'https://docs.qq.com/scenario/link.html?foo=1',
+          preview: 'https://pubminishare-30161.picsz.qpic.cn/preview.png',
+          short: 'https://m.q.qq.com/a/s/deadbeef',
+        },
+      },
+    })), [
+      'https://docs.qq.com/scenario/link.html?foo=1',
+    ])
+  })
+
+  it('follows a jump page and reads the hidden docs.qq.com link', async () => {
+    const urls = await resolveTencentDocUrlsFromJumps({
+      async text(url) {
+        assert.equal(url, 'https://example.test/share')
+        return { body: '<a href="https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh#">open</a>' }
+      },
+    }, ['https://example.test/share', 'https://m.q.qq.com/a/s/deadbeef'])
+    assert.deepEqual(urls, ['https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'])
   })
 })
 

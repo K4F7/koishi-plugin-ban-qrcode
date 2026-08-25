@@ -50,6 +50,8 @@ export function collectTencentDocUrls(text: string): string[] {
   return urls
 }
 
+const SKIP_JUMP_HOST = /(?:^|\.)(?:qpic\.cn|gtimg\.cn|myqcloud\.com|minico\.qq\.com)|(?:^|\.)m\.q\.qq\.com$/i
+
 export function extractTencentDocUrlsFromShare(payload: string): string[] {
   const urls = collectTencentDocUrls(payload)
   const seen = new Set(urls)
@@ -61,7 +63,7 @@ export function extractTencentDocUrlsFromShare(payload: string): string[] {
     }
   }
 
-  const raw = unescapePayload(payload)
+  const raw = unwrapSharePayload(payload)
   try {
     walkDocCandidates(JSON.parse(decodePercents(raw)), add)
   } catch {
@@ -73,9 +75,85 @@ export function extractTencentDocUrlsFromShare(payload: string): string[] {
   return urls
 }
 
+export function collectShareJumpUrls(payload: string): string[] {
+  const raw = unwrapSharePayload(payload)
+  const found: string[] = []
+  const seen = new Set<string>()
+  const add = (value: string) => {
+    const url = normalizeJumpUrl(value)
+    if (!url || seen.has(url) || SKIP_JUMP_HOST.test(jumpHost(url))) return
+    if (parseTencentDocUrl(url)) return
+    seen.add(url)
+    found.push(url)
+  }
+
+  try {
+    walkDocCandidates(JSON.parse(decodePercents(raw)), add)
+  } catch {
+    for (const url of collectUrls(raw)) add(url)
+  }
+  for (const match of raw.matchAll(/<(?:url|qqdocurl|pagepath|jumpurl|pcjumpurl)[^>]*>([\s\S]*?)<\//gi)) {
+    add(match[1])
+  }
+  return found
+}
+
+export async function resolveTencentDocUrlsFromJumps(http: DocHttp, jumps: readonly string[]): Promise<string[]> {
+  const urls: string[] = []
+  const seen = new Set<string>()
+  for (const jump of jumps.slice(0, 4)) {
+    if (SKIP_JUMP_HOST.test(jumpHost(jump))) continue
+    try {
+      const page = await http.text(jump, {
+        'user-agent': UA,
+        accept: 'text/html,*/*',
+      })
+      for (const url of collectTencentDocUrls(page.body)) {
+        if (seen.has(url)) continue
+        seen.add(url)
+        urls.push(url)
+      }
+    } catch {
+      // keep looking
+    }
+  }
+  return urls
+}
+
+function unwrapSharePayload(payload: string): string {
+  let text = unescapePayload(payload.trim())
+  const wrapped = /^\[(?:CQ:)?json(?:,data=|:data=)/i.exec(text)
+  if (wrapped && text.endsWith(']')) text = unescapePayload(text.slice(wrapped[0].length, -1))
+  return text
+}
+
+function normalizeJumpUrl(value: string): string {
+  const text = decodePercents(unescapePayload(value)).trim()
+  if (/^https?:\/\//i.test(text)) return text
+  if (/^\/\//.test(text)) return `https:${text}`
+  if (/^(?:docs\.qq\.com|doc\.weixin\.qq\.com)\//i.test(text)) return `https://${text}`
+  return ''
+}
+
+function jumpHost(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
 function walkDocCandidates(value: unknown, add: (value: string) => void) {
   if (typeof value === 'string') {
     add(value)
+    const trimmed = value.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        walkDocCandidates(JSON.parse(decodePercents(unescapePayload(trimmed))), add)
+      } catch {
+        // plain string
+      }
+    }
     return
   }
   if (Array.isArray(value)) {

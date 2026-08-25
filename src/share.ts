@@ -1,4 +1,4 @@
-import { decodeEntities } from './detect'
+import { collectUrls, decodeEntities } from './detect'
 import { collectTencentDocUrls } from './document'
 
 const INVITE_APPS = new Set([
@@ -61,11 +61,40 @@ export function isGroupInviteCard(payload: string): boolean {
   return false
 }
 
+const MINI_DOC_APP = /com\.tencent\.miniapp|微信小程序|\[QQ小程序\]|miniapp\.nativeshare/i
+const FRESHMAN_LIST = /大一新生|入学清单|新生必备|必备清单|入学必备|新生清单/
+
 export function isTencentDocCard(payload: string): boolean {
   const raw = normalizeShare(payload)
   if (/腾讯文档|docs\.qq\.com|doc\.weixin\.qq\.com|qqdocurl/i.test(raw)) return true
   if (TENCENT_DOC_APPIDS.has(findShareAppId(readShareJson(raw)))) return true
   return collectTencentDocUrls(raw).length > 0
+}
+
+export function isTencentDocMiniProgramCard(payload: string): boolean {
+  const raw = normalizeShare(payload)
+  if (!isTencentDocCard(raw)) return false
+  if (MINI_DOC_APP.test(raw)) return true
+  return TENCENT_DOC_APPIDS.has(findShareAppId(readShareJson(raw)))
+}
+
+/** WeChat / QQ 腾讯文档小程序卡，标题是新生清单，但卡片里往往没有 docs.qq.com 链接。 */
+export function looksLikeFreshmanListDocCard(payload: string): boolean {
+  if (!isTencentDocMiniProgramCard(payload)) return false
+  return FRESHMAN_LIST.test(extractShareCardText(payload) || normalizeShare(payload))
+}
+
+export function summarizeShare(payload: string): string {
+  const raw = normalizeShare(payload)
+  const json = readShareJson(raw)
+  const app = json ? String(json.app ?? json.view ?? '') : ''
+  const prompt = json ? String(json.prompt ?? '') : raw.replace(/\s+/g, ' ')
+  const urls = collectUrls(raw).slice(0, 4)
+  return [
+    app && `app=${app}`,
+    prompt && `prompt=${prompt.slice(0, 80)}`,
+    `urls=${urls.join(' ') || '-'}`,
+  ].filter(Boolean).join(' ')
 }
 
 export function extractShareCardText(payload: string): string {

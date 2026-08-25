@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { detectAdContent } from '../src/ad'
 import { collectMessageParts } from '../src/detect'
-import { collectTencentDocUrls, extractTencentDocUrlsFromShare } from '../src/document'
+import { collectShareJumpUrls, collectTencentDocUrls, extractTencentDocUrlsFromShare } from '../src/document'
 import {
   extractShareCardText,
   isGroupInviteCard,
   isTencentDocCard,
+  looksLikeFreshmanListDocCard,
+  summarizeShare,
   TENCENT_DOC_QQ_APPID,
   TENCENT_DOC_WECHAT_APPID,
 } from '../src/share'
@@ -222,6 +224,48 @@ describe('tencent doc share cards', () => {
     assert.deepEqual(extractTencentDocUrlsFromShare(parts.shares.find(item => item.includes('miniapp.lua')) ?? ''), [
       'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
+  })
+
+  it('treats a weixin mini-program freshman list as a doc card even without a docs.qq.com url', () => {
+    const noUrlCard = JSON.stringify({
+      app: 'com.tencent.miniapp.lua',
+      view: 'miniapp',
+      bizsrc: 'miniapp.nativeshare',
+      prompt: '[微信小程序]大一新生必备清单(详细版)(2) (1)',
+      meta: {
+        miniapp: {
+          tag: '微信小程序',
+          title: '大一新生必备清单(详细版)(2) (1)',
+          source: '腾讯文档',
+          jumpUrl: 'https://m.q.qq.com/a/s/deadbeefcafebabe',
+          pcJumpUrl: 'miniapp://open/1036?url=' + encodeURIComponent('https://m.q.qq.com/a/s/deadbeefcafebabe'),
+        },
+      },
+    })
+    assert.equal(isTencentDocCard(noUrlCard), true)
+    assert.equal(looksLikeFreshmanListDocCard(noUrlCard), true)
+    assert.deepEqual(extractTencentDocUrlsFromShare(noUrlCard), [])
+    assert.deepEqual(collectShareJumpUrls(noUrlCard), [])
+    assert.match(summarizeShare(noUrlCard), /miniapp\.lua/)
+    assert.match(summarizeShare(noUrlCard), /大一新生必备清单/)
+  })
+
+  it('does not treat a timetable mini-program or a news card title as the freshman-list fallback', () => {
+    const timetable = JSON.stringify({
+      app: 'com.tencent.miniapp.lua',
+      prompt: '[微信小程序]本学期课程表',
+      meta: {
+        miniapp: {
+          tag: '微信小程序',
+          title: '本学期课程表',
+          source: '腾讯文档',
+          jumpUrl: 'https://m.q.qq.com/a/s/abcdef',
+        },
+      },
+    })
+    assert.equal(isTencentDocCard(timetable), true)
+    assert.equal(looksLikeFreshmanListDocCard(timetable), false)
+    assert.equal(looksLikeFreshmanListDocCard(docCard), false)
   })
 
   it('flags a share card when desc already contains ad keywords', () => {
