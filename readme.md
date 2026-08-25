@@ -14,7 +14,7 @@ Recall QR-code images, group-invite share cards, and freshman-list document ads,
 
 - 🔍 **扫图识码**：下载消息里的图片，解码是否含二维码
 - 📎 **拉群卡片**：识别 QQ 邀请加群 / 推荐群聊 / 群名片分享卡
-- 📄 **文档广告**：拉取腾讯文档或 Word / 文本附件正文，识别夹带的床品推销等广告
+- 📄 **文档广告**：拉取腾讯文档（含微信 / QQ 小程序卡片）或 Word / 文本附件正文，识别夹带的床品推销等广告
 - 🗑️ **自动撤回**：命中后立刻撤回原消息
 - 🔇 **自动禁言**：默认禁言 60 秒，秒数可配
 - 🛡️ **白名单**：默认跳过群主 / 管理员，也可按用户 ID、群 ID 过滤
@@ -279,7 +279,7 @@ Actions 会 `npm ci` → `npm test` → `npm run build` → `npm publish --acces
 
 ## Changelog
 
-当前版本 **1.2.1**：Word / 文本附件默认限制 5MB（`maxOfficeMb`），防止解压占用过多内存。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。微信 / QQ 小程序腾讯文档卡会解析 `qqdocurl` 和编码 path，再按同一套正文接口分析。
+当前版本 **1.3.0**：识别微信 / QQ 小程序腾讯文档卡，还原 `docs.qq.com` 链接后再按原逻辑拉正文。1.2.1：Word / 文本附件默认限制 5MB（`maxOfficeMb`）。1.2.0 起内置广告词改到 `ad-keywords.txt` 维护。1.1.3 补拦 QQ 群名片。1.1.2 修复 OneBot `getImage` 未绑定导致的生产崩溃。1.1.1 补齐跳过原因日志。1.1.0 起拦截拉群分享卡和腾讯文档 / Word 广告。
 
 ## License
 
