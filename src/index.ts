@@ -13,9 +13,16 @@ import {
   skipModerateReason,
   summarizeSrc,
 } from './detect'
-import { collectTencentDocUrls, extractOfficeText, extractTencentDocUrlsFromShare, fetchTencentDoc } from './document'
+import {
+  collectShareJumpUrls,
+  collectTencentDocUrls,
+  extractOfficeText,
+  extractTencentDocUrlsFromShare,
+  fetchTencentDoc,
+  resolveTencentDocUrlsFromJumps,
+} from './document'
 import { createFileResolver, decodeQr, downloadFile, downloadImage, warmupQrDecoder } from './qrcode'
-import { extractShareCardText, isGroupInviteCard, isTencentDocCard } from './share'
+import { extractShareCardText, isGroupInviteCard, isTencentDocCard, looksLikeFreshmanListDocCard, summarizeShare } from './share'
 
 export const name = 'ban-qrcode'
 
@@ -163,6 +170,22 @@ export function apply(ctx: Context, config: Config) {
       }
 
       let fetchedDoc = false
+      if (!docUrls.length && docCards.length) {
+        if (config.debug) {
+          for (const card of docCards) logger.info('doc card no-url %s', summarizeShare(card))
+        }
+        const jumps = uniqueStrings(docCards.flatMap(collectShareJumpUrls))
+        if (jumps.length) {
+          try {
+            const resolved = await resolveTencentDocUrlsFromJumps(docHttp, jumps)
+            docUrls.push(...resolved.filter(url => !docUrls.includes(url)))
+            if (config.debug) logger.info('doc jump resolved=%d from=%d', resolved.length, jumps.length)
+          } catch (error) {
+            logger.warn(error)
+          }
+        }
+      }
+
       for (const url of docUrls) {
         try {
           const doc = await fetchTencentDoc(docHttp, url)
@@ -206,6 +229,12 @@ export function apply(ctx: Context, config: Config) {
           await enforce(session, config, logger, 'ad-doc')
           return
         }
+      }
+
+      if (!fetchedDoc && docCards.some(looksLikeFreshmanListDocCard)) {
+        if (config.debug) logger.info('doc card freshman-list fallback')
+        await enforce(session, config, logger, 'ad-doc')
+        return
       }
 
       for (const file of officeFiles) {
