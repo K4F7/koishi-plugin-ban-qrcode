@@ -48,6 +48,31 @@ describe('tencent doc urls', () => {
       'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
     ])
   })
+
+  it('parses weixin mini-program urls, form pages, and percent-encoded paths', () => {
+    assert.deepEqual(parseTencentDocUrl('https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc'), {
+      kind: 'doc',
+      id: 'w3_AMkAXgaQACcKN0abc',
+      pageUrl: 'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    })
+    assert.deepEqual(parseTencentDocUrl('https://docs.qq.com/form/page/DT3VGc0FmT3JhZ3ZE'), {
+      kind: 'form',
+      id: 'DT3VGc0FmT3JhZ3ZE',
+      pageUrl: 'https://docs.qq.com/form/page/DT3VGc0FmT3JhZ3ZE',
+    })
+    assert.deepEqual(collectTencentDocUrls(
+      'pages/detail/detail?url=' + encodeURIComponent('https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh'),
+    ), [
+      'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh',
+    ])
+    assert.deepEqual(collectTencentDocUrls(
+      'mqqapi://miniapp/open?_path=' + encodeURIComponent(
+        'pages/detail/detail?url=' + encodeURIComponent('https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc'),
+      ),
+    ), [
+      'https://docs.qq.com/doc/w3_AMkAXgaQACcKN0abc',
+    ])
+  })
 })
 
 describe('parseOpendocBody', () => {
@@ -102,6 +127,37 @@ describe('fetchTencentDoc', () => {
     assert.match(calls[1]?.url ?? '', /opendoc/)
     assert.equal(calls[1]?.headers?.cookie, 'TOK=abc')
     assert.equal(calls[1]?.headers?.referer, 'https://docs.qq.com/doc/DWHNhYk1iZVZMY1Rh')
+  })
+
+  it('falls back to the weixin page when the docs.qq.com view is empty', async () => {
+    const calls: string[] = []
+    const doc = await fetchTencentDoc({
+      async text(url) {
+        calls.push(url)
+        if (url.includes('docs.qq.com/doc/')) return { body: '<html></html>' }
+        if (url.includes('docs.qq.com/dop-api/opendoc')) return { body: 'clientVarsCallback({})' }
+        if (url.includes('doc.weixin.qq.com/doc/')) {
+          return {
+            body: '<link href="//doc.weixin.qq.com/dop-api/opendoc?id=w3_AMkAXgaQACcKN0abc&callback=clientVarsCallback">',
+          }
+        }
+        return {
+          body: `clientVarsCallback(${JSON.stringify({
+            clientVars: {
+              title: '微信清单',
+              collab_client_vars: {
+                initialAttributedText: { text: ['校园麦芽送货到寝'] },
+              },
+            },
+          })})`,
+        }
+      },
+    }, 'https://doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc')
+
+    assert.equal(doc?.title, '微信清单')
+    assert.ok(calls.some(url => url.includes('docs.qq.com/doc/w3_AMkAXgaQACcKN0abc')))
+    assert.ok(calls.some(url => url.includes('doc.weixin.qq.com/doc/w3_AMkAXgaQACcKN0abc')))
+    assert.ok(calls.some(url => url.includes('doc.weixin.qq.com/dop-api/opendoc')))
   })
 })
 

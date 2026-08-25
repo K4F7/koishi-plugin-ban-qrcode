@@ -1,4 +1,5 @@
 import { decodeEntities } from './detect'
+import { collectTencentDocUrls } from './document'
 
 const INVITE_APPS = new Set([
   'com.tencent.qun.invite',
@@ -6,6 +7,10 @@ const INVITE_APPS = new Set([
 ])
 
 const GROUP_PROMPT = /群名片|\[QQ名片\]群|推荐群聊|邀请你加入群聊|邀请加入群聊/
+const TENCENT_DOC_APPIDS = new Set([
+  'wxd45c635d754dbf59',
+  '1108338344',
+])
 
 export function normalizeShare(payload: string): string {
   let text = payload.trim()
@@ -54,7 +59,10 @@ export function isGroupInviteCard(payload: string): boolean {
 }
 
 export function isTencentDocCard(payload: string): boolean {
-  return /腾讯文档|docs\.qq\.com|doc\.weixin\.qq\.com/i.test(normalizeShare(payload))
+  const raw = normalizeShare(payload)
+  if (/腾讯文档|docs\.qq\.com|doc\.weixin\.qq\.com|qqdocurl/i.test(raw)) return true
+  if (TENCENT_DOC_APPIDS.has(findShareAppId(readShareJson(raw)))) return true
+  return collectTencentDocUrls(raw).length > 0
 }
 
 export function extractShareCardText(payload: string): string {
@@ -81,6 +89,8 @@ export function extractShareCardText(payload: string): string {
         add(item.tag)
         add(item.summary)
         add(item.brief)
+        add(item.appname)
+        add(item.appName)
       }
     }
     return chunks.join('\n')
@@ -130,6 +140,21 @@ function tryParseJson(text: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+function findShareAppId(value: unknown): string {
+  if (!isRecord(value)) return ''
+  for (const key of ['appid', 'appId', 'appID']) {
+    const id = value[key]
+    if (id === undefined || id === null) continue
+    const text = String(id)
+    if (TENCENT_DOC_APPIDS.has(text)) return text
+  }
+  for (const item of Object.values(value)) {
+    const found = findShareAppId(item)
+    if (found) return found
+  }
+  return ''
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
